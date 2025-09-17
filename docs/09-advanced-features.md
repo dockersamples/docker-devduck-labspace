@@ -7,7 +7,7 @@ Now that you've mastered the fundamentals of multi-agent systems, it's time to e
 
 ## Security & Authentication
 
-### 🔒 Securing Your Multi-Agent System
+### 🔐 Securing Your Multi-Agent System
 
 #### Exercise 1: API Authentication and Authorization
 
@@ -221,15 +221,15 @@ if __name__ == '__main__':
 
 ### 🛠️ Building Specialized Agents
 
-#### Exercise 2: Code Analysis Agent Example
+#### Exercise 2: Code Analysis Agent
 
 ```python
 # Create code_analysis_agent.py
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
 import time
-import re
 import logging
+import re
 
 class BaseCustomAgent(ABC):
     """Base class for creating custom agents."""
@@ -301,6 +301,22 @@ class BaseCustomAgent(ABC):
         
         finally:
             self.agent_state = "idle"
+    
+    def get_agent_info(self) -> Dict[str, Any]:
+        """Get agent information and status."""
+        avg_processing_time = (
+            self.metrics["total_processing_time"] / self.metrics["requests_handled"]
+            if self.metrics["requests_handled"] > 0 else 0
+        )
+        
+        return {
+            "name": self.agent_name,
+            "capabilities": self.capabilities,
+            "state": self.agent_state,
+            "metrics": self.metrics,
+            "avg_processing_time": avg_processing_time,
+            "error_rate": self.metrics["errors"] / max(1, self.metrics["requests_handled"])
+        }
 
 class CodeAnalysisAgent(BaseCustomAgent):
     """Specialized agent for code analysis tasks."""
@@ -308,22 +324,33 @@ class CodeAnalysisAgent(BaseCustomAgent):
     def __init__(self):
         super().__init__(
             agent_name="code_analyzer",
-            capabilities=["code_review", "complexity_analysis", "bug_detection"]
+            capabilities=["code_review", "complexity_analysis", "bug_detection", "optimization_suggestions"]
         )
         
+        # Initialize code analysis tools
         self.supported_languages = ["python", "javascript", "java", "go", "rust"]
-        self.analysis_patterns = {
+        self.analysis_patterns = self._load_analysis_patterns()
+    
+    def _load_analysis_patterns(self) -> Dict[str, List[str]]:
+        """Load code analysis patterns."""
+        return {
             "security_issues": [
-                r"eval\(", r"exec\(", r"os\.system", 
+                r"eval\(",
+                r"exec\(",
+                r"os\.system",
+                r"subprocess\.call",
+                r"input\(.*password",
                 r"password\s*=\s*['\"][^'\"]*['\"]"  # Hardcoded passwords
             ],
             "performance_issues": [
                 r"for\s+\w+\s+in\s+range\(len\(",  # Inefficient iteration
                 r"\+.*\+.*\+.*\+",                    # String concatenation
+                r"time\.sleep\(\d+\)",                 # Blocking sleep
             ],
             "code_smells": [
                 r"def\s+\w+\([^)]*\):\s*pass",       # Empty functions
                 r"except:\s*pass",                     # Bare except
+                r"import\s+\*",                        # Wildcard imports
             ]
         }
     
@@ -333,16 +360,19 @@ class CodeAnalysisAgent(BaseCustomAgent):
         
         # Keywords that indicate code analysis requests
         code_keywords = [
-            "review", "analyze", "check", "optimize", "debug", "complexity"
+            "review", "analyze", "check", "optimize", "debug", "complexity",
+            "performance", "security", "bugs", "code quality"
         ]
         
         # Check if code is present
         has_code = any([
             "```" in request.get("message", ""),
             "def " in request.get("message", ""),
-            "function " in request.get("message", "")
+            "function " in request.get("message", ""),
+            "class " in request.get("message", "")
         ])
         
+        # Check for code analysis keywords
         has_keywords = any(keyword in message for keyword in code_keywords)
         
         return has_code and has_keywords
@@ -354,27 +384,39 @@ class CodeAnalysisAgent(BaseCustomAgent):
         
         if not code_blocks:
             return {
-                "response": "No code blocks found. Please provide code within ``` blocks."
+                "response": "No code blocks found to analyze. Please provide code within ``` blocks."
             }
         
         analysis_results = []
+        
         for i, code_block in enumerate(code_blocks):
-            analysis = self._analyze_code(code_block["code"], code_block["language"])
+            language = code_block.get("language", "unknown")
+            code = code_block.get("code", "")
+            
+            # Perform analysis
+            analysis = self._analyze_code(code, language)
             analysis["block_number"] = i + 1
             analysis_results.append(analysis)
         
+        # Generate comprehensive response
         response = self._generate_analysis_response(analysis_results)
+        
         return {"response": response}
     
     def _extract_code_blocks(self, message: str) -> List[Dict[str, str]]:
         """Extract code blocks from message."""
+        # Pattern for code blocks with language specification
         pattern = r"```(\w*)\n([\s\S]*?)```"
         matches = re.findall(pattern, message)
         
-        return [{
-            "language": language or "unknown",
-            "code": code.strip()
-        } for language, code in matches]
+        code_blocks = []
+        for language, code in matches:
+            code_blocks.append({
+                "language": language or "unknown",
+                "code": code.strip()
+            })
+        
+        return code_blocks
     
     def _analyze_code(self, code: str, language: str) -> Dict[str, Any]:
         """Perform detailed code analysis."""
@@ -393,13 +435,17 @@ class CodeAnalysisAgent(BaseCustomAgent):
             issues = self._find_pattern_matches(code, patterns)
             analysis[category].extend(issues)
         
+        # Generate suggestions based on findings
         analysis["suggestions"] = self._generate_suggestions(analysis)
+        
         return analysis
     
     def _calculate_complexity(self, code: str) -> int:
         """Calculate cyclomatic complexity (simplified)."""
+        # Count decision points
         complexity_patterns = [
-            r"\bif\b", r"\belif\b", r"\bfor\b", r"\bwhile\b", r"\btry\b"
+            r"\bif\b", r"\belif\b", r"\belse\b", r"\bfor\b", 
+            r"\bwhile\b", r"\btry\b", r"\bexcept\b", r"\band\b", r"\bor\b"
         ]
         
         complexity = 1  # Base complexity
@@ -409,7 +455,7 @@ class CodeAnalysisAgent(BaseCustomAgent):
         
         return complexity
     
-    def _find_pattern_matches(self, code: str, patterns: List[str]) -> List[Dict]:
+    def _find_pattern_matches(self, code: str, patterns: List[str]) -> List[Dict[str, str]]:
         """Find pattern matches in code."""
         issues = []
         lines = code.split('\n')
@@ -422,20 +468,28 @@ class CodeAnalysisAgent(BaseCustomAgent):
                         "code": line.strip(),
                         "pattern": pattern
                     })
+        
         return issues
     
     def _generate_suggestions(self, analysis: Dict[str, Any]) -> List[str]:
-        """Generate improvement suggestions."""
+        """Generate improvement suggestions based on analysis."""
         suggestions = []
         
+        # Security suggestions
         if analysis["security_issues"]:
-            suggestions.append("Review security issues: avoid eval(), exec(), hardcoded credentials.")
+            suggestions.append("Consider reviewing security issues: avoid using eval(), exec(), and hardcoded credentials.")
         
+        # Performance suggestions
         if analysis["performance_issues"]:
             suggestions.append("Optimize performance: use list comprehensions, avoid string concatenation in loops.")
         
+        # Complexity suggestions
         if analysis["complexity_score"] > 10:
-            suggestions.append("High complexity detected. Break down into smaller functions.")
+            suggestions.append("High complexity detected. Consider breaking down functions into smaller, more focused methods.")
+        
+        # Code smell suggestions
+        if analysis["code_smells"]:
+            suggestions.append("Address code smells: avoid empty functions, bare except clauses, and wildcard imports.")
         
         return suggestions
     
@@ -445,7 +499,9 @@ class CodeAnalysisAgent(BaseCustomAgent):
         
         for analysis in analysis_results:
             block_num = analysis["block_number"]
-            response_parts.append(f"### Code Block {block_num} ({analysis['language']})")
+            response_parts.append(f"### Code Block {block_num} ({analysis['language']})\n")
+            
+            # Basic metrics
             response_parts.append(f"- **Lines of Code**: {analysis['lines_of_code']}")
             response_parts.append(f"- **Complexity Score**: {analysis['complexity_score']}")
             
@@ -455,7 +511,7 @@ class CodeAnalysisAgent(BaseCustomAgent):
                 if issues:
                     issue_name = issue_type.replace('_', ' ').title()
                     response_parts.append(f"\n**{issue_name}:**")
-                    for issue in issues[:3]:  # Limit to first 3
+                    for issue in issues[:3]:  # Limit to first 3 issues
                         response_parts.append(f"- Line {issue['line']}: {issue['code']}")
             
             # Suggestions
@@ -464,1074 +520,657 @@ class CodeAnalysisAgent(BaseCustomAgent):
                 for suggestion in analysis["suggestions"]:
                     response_parts.append(f"- {suggestion}")
             
-            response_parts.append("\n")
+            response_parts.append("\n---\n")
         
         return "\n".join(response_parts)
 
-# Test the custom agent
+# Agent Registry for managing custom agents
+class AgentRegistry:
+    """Registry for managing multiple custom agents."""
+    
+    def __init__(self):
+        self.agents: Dict[str, BaseCustomAgent] = {}
+        self.logger = logging.getLogger("agent_registry")
+    
+    def register_agent(self, agent: BaseCustomAgent):
+        """Register a new agent."""
+        self.agents[agent.agent_name] = agent
+        self.logger.info(f"Registered agent: {agent.agent_name}")
+    
+    def find_capable_agent(self, request: Dict[str, Any]) -> Optional[BaseCustomAgent]:
+        """Find an agent capable of handling the request."""
+        for agent in self.agents.values():
+            if agent.can_handle(request):
+                return agent
+        return None
+    
+    def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Route request to appropriate agent."""
+        agent = self.find_capable_agent(request)
+        
+        if agent:
+            return agent.handle_request(request)
+        else:
+            return {
+                "success": False,
+                "error": "No capable agent found for this request",
+                "available_agents": list(self.agents.keys())
+            }
+    
+    def get_registry_status(self) -> Dict[str, Any]:
+        """Get status of all registered agents."""
+        return {
+            "total_agents": len(self.agents),
+            "agents": {name: agent.get_agent_info() for name, agent in self.agents.items()}
+        }
+
+# Example usage
 if __name__ == '__main__':
-    agent = CodeAnalysisAgent()
+    # Create agent registry
+    registry = AgentRegistry()
+    
+    # Register custom agents
+    code_agent = CodeAnalysisAgent()
+    registry.register_agent(code_agent)
     
     # Test request
     test_request = {
-        "message": """Please review this Python code:
-        
-```python
-def process_data(data):
-    result = ""
-    for i in range(len(data)):
-        result = result + str(data[i]) + ","
-    return result
-
-def login(username, password):
-    if password == "admin123":  # Security issue!
-        return True
-    return False
-```"""
+        "message": "Please review this Python code:\n```python\ndef calculate_total(items):\n    total = 0\n    for i in range(len(items)):\n        total = total + items[i].price\n    return total\n```"
     }
     
-    print("🔍 Testing Code Analysis Agent")
-    print("=" * 35)
+    print("🛠️ Testing Custom Code Analysis Agent")
+    print("=" * 45)
     
-    if agent.can_handle(test_request):
-        response = agent.handle_request(test_request)
-        print(f"Analysis completed in {response['processing_time']:.2f}s")
-        print("\nResponse:")
-        print(response['response'])
+    response = registry.handle_request(test_request)
+    
+    if response["success"]:
+        print("✅ Analysis completed successfully:")
+        print(response["response"])
     else:
-        print("Agent cannot handle this request")
+        print(f"❌ Analysis failed: {response['error']}")
+    
+    # Show registry status
+    status = registry.get_registry_status()
+    print(f"\n📊 Registry Status: {status['total_agents']} agents registered")
+    for name, info in status['agents'].items():
+        print(f"  {name}: {info['metrics']['requests_handled']} requests handled")
 ```
 
-## Production Deployment
+## Enterprise Integration
 
-### 🏭 Enterprise-Grade Deployment
+### 🏢 Production Deployment Patterns
 
-#### Exercise 3: Production Configuration
+#### Exercise 3: Kubernetes Deployment
 
 ```yaml
-# Create production-compose.yml
-version: '3.8'
-
-networks:
-  frontend:
-    driver: bridge
-  backend:
-    driver: bridge
-    internal: true
-  monitoring:
-    driver: bridge
-
-volumes:
-  model-cache:
-    driver: local
-    driver_opts:
-      type: none
-      device: /opt/devduck/models
-      o: bind
-  app-logs:
-    driver: local
-    driver_opts:
-      type: none
-      device: /var/log/devduck
-      o: bind
-  ssl-certs:
-    driver: local
-    driver_opts:
-      type: none
-      device: /etc/ssl/devduck
-      o: bind
-
-services:
-  # Production Load Balancer with SSL
-  nginx-lb:
-    image: nginx:alpine
-    container_name: devduck-lb-prod
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/prod-nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl.conf:/etc/nginx/conf.d/ssl.conf:ro
-      - ssl-certs:/etc/nginx/ssl:ro
-      - app-logs:/var/log/nginx
-    environment:
-      - NGINX_ENTRYPOINT_QUIET_LOGS=1
-    networks:
-      - frontend
-      - backend
-    depends_on:
-      - devduck-agent-prod
-    healthcheck:
-      test: ["CMD", "curl", "-f", "https://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-
-  # Production DevDuck Agent Cluster
-  devduck-agent-prod:
-    build:
-      context: ./agents
-      dockerfile: Dockerfile.prod
-      args:
-        - BUILD_ENV=production
-    image: devduck-agent:prod
-    restart: unless-stopped
-    environment:
-      - ENVIRONMENT=production
-      - DEBUG=false
-      - LOG_LEVEL=WARNING
-      - WORKERS=4
-      - CEREBRAS_API_KEY_FILE=/run/secrets/cerebras_api_key
-      - JWT_SECRET_FILE=/run/secrets/jwt_secret
-      - DATABASE_URL=postgresql://devduck:${DB_PASSWORD}@postgres-prod:5432/devduck_prod
-      - REDIS_URL=redis://redis-prod:6379/0
-      - METRICS_ENABLED=true
-    volumes:
-      - model-cache:/app/models:ro
-      - app-logs:/app/logs
-    networks:
-      - backend
-      - monitoring
-    secrets:
-      - cerebras_api_key
-      - jwt_secret
-    deploy:
-      replicas: 3
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 4G
-        reservations:
-          cpus: '1.0'
-          memory: 2G
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-      update_config:
-        parallelism: 1
-        delay: 30s
-        failure_action: rollback
-        order: start-first
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-
-  # Production PostgreSQL
-  postgres-prod:
-    image: postgres:15-alpine
-    container_name: devduck-postgres-prod
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=devduck_prod
-      - POSTGRES_USER=devduck
-      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
-      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./sql/prod-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-      - app-logs:/var/log/postgresql
-    networks:
-      - backend
-    secrets:
-      - db_password
-    command: >
-      postgres
-      -c max_connections=200
-      -c shared_buffers=256MB
-      -c effective_cache_size=1GB
-      -c maintenance_work_mem=64MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
-      -c default_statistics_target=100
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c work_mem=4MB
-      -c min_wal_size=1GB
-      -c max_wal_size=4GB
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 1G
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U devduck -d devduck_prod"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  # Production Redis with Persistence
-  redis-prod:
-    image: redis:7-alpine
-    container_name: devduck-redis-prod
-    restart: unless-stopped
-    command: >
-      redis-server
-      --maxmemory 1gb
-      --maxmemory-policy allkeys-lru
-      --appendonly yes
-      --appendfsync everysec
-      --auto-aof-rewrite-percentage 100
-      --auto-aof-rewrite-min-size 64mb
-      --save 900 1
-      --save 300 10
-      --save 60 10000
-    volumes:
-      - redis-data:/data
-      - app-logs:/var/log/redis
-    networks:
-      - backend
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 1.5G
-        reservations:
-          cpus: '0.25'
-          memory: 1G
-    healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 20s
-
-secrets:
-  cerebras_api_key:
-    file: ./secrets/cerebras_api_key.txt
-  jwt_secret:
-    file: ./secrets/jwt_secret.txt
-  db_password:
-    file: ./secrets/db_password.txt
-
-volumes:
-  postgres-data:
-  redis-data:
+# Create kubernetes/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: devduck-multi-agent
+  labels:
+    name: devduck-multi-agent
+    environment: production
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devduck-config
+  namespace: devduck-multi-agent
+data:
+  LOG_LEVEL: "INFO"
+  ENVIRONMENT: "production"
+  DEBUG: "false"
+  WORKERS: "4"
+  MAX_CONCURRENT_REQUESTS: "100"
+  REQUEST_TIMEOUT: "60"
+  CACHE_TTL: "300"
+  METRICS_ENABLED: "true"
+---
+# Secret for sensitive data
+apiVersion: v1
+kind: Secret
+metadata:
+  name: devduck-secrets
+  namespace: devduck-multi-agent
+type: Opaque
+stringData:
+  CEREBRAS_API_KEY: "your-api-key-here"
+  JWT_SECRET_KEY: "your-jwt-secret-here"
+  DATABASE_URL: "postgresql://user:pass@db:5432/devduck"
+---
+# DevDuck Agent Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devduck-agent
+  namespace: devduck-multi-agent
+  labels:
+    app: devduck-agent
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: devduck-agent
+  template:
+    metadata:
+      labels:
+        app: devduck-agent
+        version: v1
+    spec:
+      serviceAccountName: devduck-service-account
+      containers:
+      - name: devduck-agent
+        image: devduck-agent:1.0.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: CEREBRAS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: devduck-secrets
+              key: CEREBRAS_API_KEY
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: devduck-secrets
+              key: JWT_SECRET_KEY
+        envFrom:
+        - configMapRef:
+            name: devduck-config
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        volumeMounts:
+        - name: model-cache
+          mountPath: /app/models
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: model-cache-pvc
+      - name: tmp
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - devduck-agent
+              topologyKey: kubernetes.io/hostname
+---
+# Service for DevDuck Agent
+apiVersion: v1
+kind: Service
+metadata:
+  name: devduck-agent-service
+  namespace: devduck-multi-agent
+  labels:
+    app: devduck-agent
+    service: devduck-agent
+spec:
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: metrics
+  selector:
+    app: devduck-agent
+---
+# Ingress for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: devduck-ingress
+  namespace: devduck-multi-agent
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  tls:
+  - hosts:
+    - devduck.yourdomain.com
+    secretName: devduck-tls
+  rules:
+  - host: devduck.yourdomain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: devduck-agent-service
+            port:
+              number: 80
+---
+# Horizontal Pod Autoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: devduck-agent-hpa
+  namespace: devduck-multi-agent
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: devduck-agent
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Pods
+        value: 4
+        periodSeconds: 60
+---
+# PersistentVolumeClaim for model storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-pvc
+  namespace: devduck-multi-agent
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: fast-ssd
 ```
 
-#### Production Deployment Script
+#### Deployment Script
 
 ```bash
-# Create deploy-production.sh
-cat > deploy-production.sh << 'EOF'
+# Create deploy-to-k8s.sh
+cat > deploy-to-k8s.sh << 'EOF'
 #!/bin/bash
-set -euo pipefail
+set -e
 
-# Production deployment script for DevDuck Multi-Agent System
-echo "🚀 DevDuck Production Deployment"
-echo "================================="
+echo "🚀 Deploying DevDuck Multi-Agent System to Kubernetes"
+echo "===================================================="
 
 # Configuration
-PROJECT_NAME="devduck-prod"
-DOMAIN="${DOMAIN:-localhost}"
-ENVIRONMENT="production"
-BACKUP_DIR="./backups/$(date +%Y%m%d_%H%M%S)"
+NAMESPACE="devduck-multi-agent"
+APP_VERSION=${APP_VERSION:-"1.0.0"}
+DOCKER_REGISTRY=${DOCKER_REGISTRY:-"your-registry.com"}
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Logging function
-log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
-}
-
-warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+# Check prerequisites
+echo "🔍 Checking prerequisites..."
+if ! command -v kubectl &> /dev/null; then
+    echo "❌ kubectl is not installed"
     exit 1
-}
+fi
 
-# Pre-flight checks
-log "Running pre-flight checks..."
-
-# Check Docker
 if ! command -v docker &> /dev/null; then
-    error "Docker is not installed or not in PATH"
+    echo "❌ Docker is not installed"
+    exit 1
 fi
 
-if ! docker info &> /dev/null; then
-    error "Docker daemon is not running"
-fi
+# Build and push Docker image
+echo "🏗️  Building Docker image..."
+docker build -t devduck-agent:${APP_VERSION} ./agents
+docker tag devduck-agent:${APP_VERSION} ${DOCKER_REGISTRY}/devduck-agent:${APP_VERSION}
 
-# Check Docker Compose
-if ! command -v docker-compose &> /dev/null; then
-    error "Docker Compose is not installed"
-fi
+echo "📤 Pushing to registry..."
+docker push ${DOCKER_REGISTRY}/devduck-agent:${APP_VERSION}
 
-# Check required files
-required_files=(
-    "production-compose.yml"
-    "nginx/prod-nginx.conf"
-    "agents/Dockerfile.prod"
-)
+# Update image in Kubernetes manifests
+echo "📝 Updating Kubernetes manifests..."
+sed -i "s|image: devduck-agent:.*|image: ${DOCKER_REGISTRY}/devduck-agent:${APP_VERSION}|g" kubernetes/namespace.yaml
 
-for file in "${required_files[@]}"; do
-    if [[ ! -f "$file" ]]; then
-        error "Required file not found: $file"
-    fi
-done
+# Apply Kubernetes manifests
+echo "☸️  Applying Kubernetes manifests..."
+kubectl apply -f kubernetes/namespace.yaml
 
-# Check secrets
-log "Checking secrets..."
-mkdir -p secrets
+# Wait for deployment
+echo "⏳ Waiting for deployment to be ready..."
+kubectl wait --for=condition=available --timeout=300s deployment/devduck-agent -n ${NAMESPACE}
 
-if [[ ! -f "secrets/cerebras_api_key.txt" ]]; then
-    read -p "Enter Cerebras API key: " -s cerebras_key
-    echo "$cerebras_key" > secrets/cerebras_api_key.txt
-    chmod 600 secrets/cerebras_api_key.txt
-fi
+# Check status
+echo "📊 Checking deployment status..."
+kubectl get pods -n ${NAMESPACE} -l app=devduck-agent
+kubectl get services -n ${NAMESPACE}
+kubectl get ingress -n ${NAMESPACE}
 
-if [[ ! -f "secrets/jwt_secret.txt" ]]; then
-    openssl rand -hex 32 > secrets/jwt_secret.txt
-    chmod 600 secrets/jwt_secret.txt
-fi
-
-if [[ ! -f "secrets/db_password.txt" ]]; then
-    openssl rand -base64 32 > secrets/db_password.txt
-    chmod 600 secrets/db_password.txt
-fi
-
-# SSL Certificates
-log "Setting up SSL certificates..."
-mkdir -p ssl
-
-if [[ ! -f "ssl/cert.pem" || ! -f "ssl/key.pem" ]]; then
-    if [[ "$DOMAIN" == "localhost" ]]; then
-        warn "Generating self-signed certificate for localhost"
-        openssl req -x509 -newkey rsa:4096 -keyout ssl/key.pem -out ssl/cert.pem -days 365 -nodes \
-            -subj "/C=US/ST=CA/L=San Francisco/O=DevDuck/CN=localhost"
-    else
-        warn "Please ensure SSL certificates are available at ssl/cert.pem and ssl/key.pem"
-        warn "For production, use certificates from a trusted CA"
-    fi
-fi
-
-# Backup existing deployment
-if docker-compose -p $PROJECT_NAME -f production-compose.yml ps | grep -q "Up"; then
-    log "Creating backup of existing deployment..."
-    mkdir -p "$BACKUP_DIR"
-    
-    # Export current data
-    docker-compose -p $PROJECT_NAME -f production-compose.yml exec -T postgres-prod \
-        pg_dump -U devduck devduck_prod > "$BACKUP_DIR/database.sql" || warn "Database backup failed"
-    
-    # Backup volumes
-    docker run --rm -v devduck-prod_postgres-data:/data -v "$PWD/$BACKUP_DIR":/backup \
-        alpine tar czf /backup/postgres-data.tar.gz -C /data . || warn "Postgres volume backup failed"
-    
-    docker run --rm -v devduck-prod_redis-data:/data -v "$PWD/$BACKUP_DIR":/backup \
-        alpine tar czf /backup/redis-data.tar.gz -C /data . || warn "Redis volume backup failed"
-    
-    log "Backup completed: $BACKUP_DIR"
-fi
-
-# Build production images
-log "Building production images..."
-docker-compose -p $PROJECT_NAME -f production-compose.yml build --no-cache
-
-# Deploy services
-log "Deploying services..."
-docker-compose -p $PROJECT_NAME -f production-compose.yml up -d
-
-# Wait for services to be healthy
-log "Waiting for services to be healthy..."
-sleep 30
-
-# Health checks
-log "Running health checks..."
-health_check_passed=true
-
-# Check database
-if ! docker-compose -p $PROJECT_NAME -f production-compose.yml exec -T postgres-prod \
-    pg_isready -U devduck -d devduck_prod; then
-    error "Database health check failed"
-    health_check_passed=false
-fi
-
-# Check Redis
-if ! docker-compose -p $PROJECT_NAME -f production-compose.yml exec -T redis-prod \
-    redis-cli ping | grep -q PONG; then
-    warn "Redis health check failed"
-    health_check_passed=false
-fi
-
-# Check DevDuck agents
-if ! curl -f -s "http://localhost/health" > /dev/null; then
-    warn "DevDuck agent health check failed"
-    health_check_passed=false
-fi
-
-if [[ "$health_check_passed" == "true" ]]; then
-    log "✅ All health checks passed!"
+# Get external URL
+INGRESS_IP=$(kubectl get ingress devduck-ingress -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+if [ -n "$INGRESS_IP" ]; then
+    echo "🌐 Application available at: https://${INGRESS_IP}"
 else
-    warn "Some health checks failed. Check the logs for details."
+    echo "🌐 Check ingress configuration for external access"
 fi
 
-# Display status
-log "Deployment Status:"
-docker-compose -p $PROJECT_NAME -f production-compose.yml ps
+echo "✅ Deployment completed successfully!"
+echo "📋 Next steps:"
+echo "   1. Configure DNS for your domain"
+echo "   2. Set up monitoring and alerting"
+echo "   3. Configure backup and disaster recovery"
+echo "   4. Review security settings"
 
-log "Service URLs:"
-echo "  🌐 Application: https://$DOMAIN"
-echo "  📊 Health Check: https://$DOMAIN/health"
-echo "  📈 Metrics: https://$DOMAIN/metrics (restricted)"
-
-log "Useful Commands:"
-echo "  View logs: docker-compose -p $PROJECT_NAME -f production-compose.yml logs -f"
-echo "  Scale agents: docker-compose -p $PROJECT_NAME -f production-compose.yml up -d --scale devduck-agent-prod=5"
-echo "  Stop services: docker-compose -p $PROJECT_NAME -f production-compose.yml down"
-echo "  Backup data: ./backup-production.sh"
-
-log "🎉 Production deployment completed successfully!"
 EOF
 
-chmod +x deploy-production.sh
-echo "✅ Production deployment script created!"
-echo "Run with: ./deploy-production.sh"
-```
-
-## Monitoring & Alerting
-
-### 📊 Production Monitoring
-
-#### Exercise 4: Comprehensive Monitoring Setup
-
-```bash
-# Create monitoring configuration
-mkdir -p monitoring/{prometheus,grafana,alertmanager}
-
-# Prometheus configuration for production
-cat > monitoring/prometheus/prometheus.prod.yml << 'EOF'
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-  external_labels:
-    cluster: 'devduck-prod'
-    region: 'us-west-2'
-
-rule_files:
-  - "/etc/prometheus/rules/*.yml"
-
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets:
-          - alertmanager:9093
-      timeout: 10s
-      api_version: v1
-
-scrape_configs:
-  # DevDuck Application Metrics
-  - job_name: 'devduck-app'
-    static_configs:
-      - targets: 
-          - 'devduck-agent-prod:8000'
-    metrics_path: '/metrics'
-    scrape_interval: 10s
-    scrape_timeout: 5s
-    
-  # System Metrics
-  - job_name: 'node-exporter'
-    static_configs:
-      - targets: ['node-exporter:9100']
-    scrape_interval: 15s
-
-  # Container Metrics
-  - job_name: 'cadvisor'
-    static_configs:
-      - targets: ['cadvisor:8080']
-    metrics_path: '/metrics'
-    scrape_interval: 15s
-
-  # PostgreSQL Metrics
-  - job_name: 'postgres'
-    static_configs:
-      - targets: ['postgres-exporter:9187']
-    scrape_interval: 15s
-
-  # Redis Metrics  
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis-exporter:9121']
-    scrape_interval: 15s
-
-  # Nginx Metrics
-  - job_name: 'nginx'
-    static_configs:
-      - targets: ['nginx-exporter:9113']
-    scrape_interval: 15s
-
-  # Blackbox Monitoring (External Probes)
-  - job_name: 'blackbox'
-    metrics_path: /probe
-    params:
-      module: [http_2xx]
-    static_configs:
-      - targets:
-        - https://your-domain.com/health
-        - https://your-domain.com/api/status
-    relabel_configs:
-      - source_labels: [__address__]
-        target_label: __param_target
-      - source_labels: [__param_target]
-        target_label: instance
-      - target_label: __address__
-        replacement: blackbox-exporter:9115
-EOF
-
-# Alert Rules
-cat > monitoring/prometheus/rules/devduck-alerts.yml << 'EOF'
-groups:
-- name: devduck.rules
-  interval: 30s
-  rules:
-  # Application Alerts
-  - alert: DevDuckHighResponseTime
-    expr: histogram_quantile(0.95, rate(devduck_response_time_seconds_bucket[5m])) > 10
-    for: 2m
-    labels:
-      severity: warning
-      service: devduck
-    annotations:
-      summary: "DevDuck high response time"
-      description: "DevDuck 95th percentile response time is {{ $value }}s"
-
-  - alert: DevDuckHighErrorRate
-    expr: rate(devduck_requests_total{status=~"5.."}[5m]) / rate(devduck_requests_total[5m]) > 0.05
-    for: 1m
-    labels:
-      severity: critical
-      service: devduck
-    annotations:
-      summary: "DevDuck high error rate"
-      description: "DevDuck error rate is {{ $value | humanizePercentage }}"
-
-  - alert: DevDuckAgentDown
-    expr: up{job="devduck-app"} == 0
-    for: 1m
-    labels:
-      severity: critical
-      service: devduck
-    annotations:
-      summary: "DevDuck agent is down"
-      description: "DevDuck agent {{ $labels.instance }} has been down for more than 1 minute"
-
-  - alert: DevDuckLowThroughput
-    expr: rate(devduck_requests_total[5m]) < 1
-    for: 5m
-    labels:
-      severity: warning
-      service: devduck
-    annotations:
-      summary: "DevDuck low throughput"
-      description: "DevDuck is processing less than 1 request per second"
-
-  # Infrastructure Alerts
-  - alert: HighMemoryUsage
-    expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.85
-    for: 5m
-    labels:
-      severity: warning
-      service: system
-    annotations:
-      summary: "High memory usage"
-      description: "Memory usage is above 85% (current value: {{ $value | humanizePercentage }})"
-
-  - alert: HighCPUUsage
-    expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
-    for: 5m
-    labels:
-      severity: warning
-      service: system
-    annotations:
-      summary: "High CPU usage"
-      description: "CPU usage is above 80% (current value: {{ $value }}%)"
-
-  - alert: DiskSpaceLow
-    expr: (node_filesystem_free_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"}) * 100 < 10
-    for: 5m
-    labels:
-      severity: critical
-      service: system
-    annotations:
-      summary: "Low disk space"
-      description: "Disk space is below 10% (current value: {{ $value }}%)"
-
-  # Database Alerts
-  - alert: PostgreSQLDown
-    expr: pg_up == 0
-    for: 1m
-    labels:
-      severity: critical
-      service: database
-    annotations:
-      summary: "PostgreSQL is down"
-      description: "PostgreSQL instance {{ $labels.instance }} is down"
-
-  - alert: PostgreSQLHighConnections
-    expr: pg_stat_database_numbackends / pg_settings_max_connections > 0.8
-    for: 5m
-    labels:
-      severity: warning
-      service: database
-    annotations:
-      summary: "PostgreSQL high connections"
-      description: "PostgreSQL connection usage is above 80%"
-
-  # Redis Alerts
-  - alert: RedisDown
-    expr: redis_up == 0
-    for: 1m
-    labels:
-      severity: critical
-      service: cache
-    annotations:
-      summary: "Redis is down"
-      description: "Redis instance {{ $labels.instance }} is down"
-
-  - alert: RedisHighMemoryUsage
-    expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
-    for: 5m
-    labels:
-      severity: warning
-      service: cache
-    annotations:
-      summary: "Redis high memory usage"
-      description: "Redis memory usage is above 90%"
-EOF
-
-echo "📊 Monitoring configuration created!"
-echo "Deploy with: docker-compose -f monitoring-stack.yml up -d"
+chmod +x deploy-to-k8s.sh
 ```
 
 ## Performance Optimization
 
-### ⚡ Advanced Optimization Techniques
+### ⚡ Advanced Caching Strategies
 
 ```python
-# Create performance_optimizer.py
-import asyncio
-import aiohttp
+# Create advanced_cache.py
+import redis
+import pickle
+import hashlib
 import time
-from typing import Dict, List, Optional
-import statistics
-from concurrent.futures import ThreadPoolExecutor
+import json
+from typing import Any, Optional, Dict
+from dataclasses import dataclass
 
-class PerformanceOptimizer:
-    """Advanced performance optimization for multi-agent systems."""
+@dataclass
+class CacheStats:
+    hits: int = 0
+    misses: int = 0
+    total_requests: int = 0
     
-    def __init__(self):
-        self.metrics_history = []
-        self.optimization_actions = []
-        self.thresholds = {
-            'response_time_p95': 5.0,  # 5 seconds
-            'error_rate': 0.02,         # 2%
-            'cpu_usage': 80.0,          # 80%
-            'memory_usage': 85.0,       # 85%
-            'queue_depth': 10           # 10 pending requests
+    @property
+    def hit_rate(self) -> float:
+        return self.hits / max(1, self.total_requests)
+
+class AdvancedCacheManager:
+    def __init__(self, redis_url: str = "redis://localhost:6379/0"):
+        self.redis_client = redis.from_url(redis_url)
+        self.stats = CacheStats()
+        self.default_ttl = 300  # 5 minutes
+        
+        # Cache prefixes for different types
+        self.prefixes = {
+            "conversation": "conv:",
+            "agent_response": "resp:",
+            "model_output": "model:",
+            "user_session": "sess:",
+            "system_config": "config:"
         }
     
-    async def analyze_performance(self) -> Dict:
-        """Analyze current system performance."""
-        tasks = [
-            self._measure_response_times(),
-            self._check_error_rates(),
-            self._monitor_resources(),
-            self._analyze_bottlenecks()
-        ]
-        
-        results = await asyncio.gather(*tasks)
-        
-        performance_analysis = {
-            'timestamp': time.time(),
-            'response_metrics': results[0],
-            'error_metrics': results[1],
-            'resource_metrics': results[2],
-            'bottleneck_analysis': results[3],
-            'optimization_recommendations': []
-        }
-        
-        # Generate recommendations
-        recommendations = self._generate_recommendations(performance_analysis)
-        performance_analysis['optimization_recommendations'] = recommendations
-        
-        self.metrics_history.append(performance_analysis)
-        
-        return performance_analysis
+    def _generate_key(self, cache_type: str, identifier: str) -> str:
+        """Generate cache key with prefix."""
+        prefix = self.prefixes.get(cache_type, "misc:")
+        # Hash long identifiers
+        if len(identifier) > 100:
+            identifier = hashlib.sha256(identifier.encode()).hexdigest()
+        return f"{prefix}{identifier}"
     
-    async def _measure_response_times(self) -> Dict:
-        """Measure response times across different endpoints."""
-        endpoints = [
-            '/health',
-            '/chat',
-            '/metrics'
-        ]
+    def get(self, cache_type: str, identifier: str) -> Optional[Any]:
+        """Get item from cache."""
+        key = self._generate_key(cache_type, identifier)
+        self.stats.total_requests += 1
         
-        response_times = {}
-        
-        async with aiohttp.ClientSession() as session:
-            for endpoint in endpoints:
-                times = []
-                
-                for _ in range(10):  # 10 samples per endpoint
-                    start_time = time.time()
-                    try:
-                        async with session.get(f'http://localhost:8000{endpoint}', timeout=30) as response:
-                            duration = time.time() - start_time
-                            times.append(duration)
-                    except Exception:
-                        times.append(30.0)  # Timeout value
-                
-                if times:
-                    response_times[endpoint] = {
-                        'mean': statistics.mean(times),
-                        'median': statistics.median(times),
-                        'p95': statistics.quantiles(times, n=20)[18] if len(times) >= 20 else max(times),
-                        'min': min(times),
-                        'max': max(times)
-                    }
-        
-        return response_times
-    
-    async def _check_error_rates(self) -> Dict:
-        """Check error rates from application metrics."""
-        # Simulate checking metrics endpoint
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get('http://localhost:8000/metrics', timeout=10) as response:
-                    if response.status == 200:
-                        # Parse metrics (simplified)
-                        return {
-                            'overall_error_rate': 0.01,  # 1%
-                            'local_agent_errors': 0.005,
-                            'cerebras_agent_errors': 0.015,
-                            'system_errors': 0.002
-                        }
-        except Exception:
-            pass
-        
-        return {'error': 'Could not retrieve error metrics'}
+            cached_data = self.redis_client.get(key)
+            if cached_data:
+                self.stats.hits += 1
+                return pickle.loads(cached_data)
+            else:
+                self.stats.misses += 1
+                return None
+        except Exception as e:
+            print(f"Cache get error: {e}")
+            self.stats.misses += 1
+            return None
     
-    async def _monitor_resources(self) -> Dict:
-        """Monitor system resource usage."""
-        # This would integrate with Docker stats or system monitoring
-        # Simulated for example purposes
-        return {
-            'cpu_usage_percent': 75.2,
-            'memory_usage_percent': 68.5,
-            'disk_usage_percent': 45.0,
-            'network_io_mbps': 12.3,
-            'container_count': 3,
-            'healthy_containers': 3
+    def set(self, cache_type: str, identifier: str, value: Any, ttl: Optional[int] = None) -> bool:
+        """Set item in cache."""
+        key = self._generate_key(cache_type, identifier)
+        ttl = ttl or self.default_ttl
+        
+        try:
+            serialized_data = pickle.dumps(value)
+            return self.redis_client.setex(key, ttl, serialized_data)
+        except Exception as e:
+            print(f"Cache set error: {e}")
+            return False
+    
+    def delete(self, cache_type: str, identifier: str) -> bool:
+        """Delete item from cache."""
+        key = self._generate_key(cache_type, identifier)
+        
+        try:
+            return bool(self.redis_client.delete(key))
+        except Exception as e:
+            print(f"Cache delete error: {e}")
+            return False
+    
+    def exists(self, cache_type: str, identifier: str) -> bool:
+        """Check if item exists in cache."""
+        key = self._generate_key(cache_type, identifier)
+        
+        try:
+            return bool(self.redis_client.exists(key))
+        except Exception as e:
+            print(f"Cache exists error: {e}")
+            return False
+    
+    def cache_conversation_response(self, conversation_id: str, query: str, response: str, agent: str, ttl: int = 1800):
+        """Cache conversation response with metadata."""
+        cache_data = {
+            "response": response,
+            "agent": agent,
+            "timestamp": time.time(),
+            "query_hash": hashlib.md5(query.encode()).hexdigest()
         }
+        
+        identifier = f"{conversation_id}:{cache_data['query_hash']}"
+        return self.set("agent_response", identifier, cache_data, ttl)
     
-    async def _analyze_bottlenecks(self) -> List[Dict]:
-        """Analyze potential system bottlenecks."""
-        bottlenecks = []
+    def get_cached_response(self, conversation_id: str, query: str) -> Optional[Dict]:
+        """Get cached response for conversation and query."""
+        query_hash = hashlib.md5(query.encode()).hexdigest()
+        identifier = f"{conversation_id}:{query_hash}"
         
-        # Analyze agent response patterns
-        recent_metrics = self.metrics_history[-5:] if len(self.metrics_history) >= 5 else self.metrics_history
+        return self.get("agent_response", identifier)
+    
+    def invalidate_conversation(self, conversation_id: str):
+        """Invalidate all cache entries for a conversation."""
+        pattern = self._generate_key("agent_response", f"{conversation_id}:*")
         
-        if recent_metrics:
-            avg_response_times = []
-            for metric in recent_metrics:
-                if 'response_metrics' in metric and '/chat' in metric['response_metrics']:
-                    avg_response_times.append(metric['response_metrics']['/chat']['mean'])
+        try:
+            keys = self.redis_client.keys(pattern)
+            if keys:
+                self.redis_client.delete(*keys)
+        except Exception as e:
+            print(f"Cache invalidation error: {e}")
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get comprehensive cache statistics."""
+        try:
+            # Redis info
+            redis_info = self.redis_client.info('memory')
+            redis_stats = self.redis_client.info('stats')
             
-            if avg_response_times and statistics.mean(avg_response_times) > 8.0:
-                bottlenecks.append({
-                    'type': 'slow_responses',
-                    'severity': 'high',
-                    'description': 'Chat endpoint showing consistently slow response times',
-                    'suggested_action': 'Scale up agents or optimize model loading'
-                })
-        
-        # Check for resource constraints
-        # This would be implemented based on actual resource monitoring
-        
-        return bottlenecks
-    
-    def _generate_recommendations(self, analysis: Dict) -> List[str]:
-        """Generate optimization recommendations based on analysis."""
-        recommendations = []
-        
-        # Response time recommendations
-        response_metrics = analysis.get('response_metrics', {})
-        chat_metrics = response_metrics.get('/chat', {})
-        
-        if chat_metrics.get('p95', 0) > self.thresholds['response_time_p95']:
-            recommendations.append(
-                "Scale up DevDuck agents - 95th percentile response time exceeds threshold"
-            )
-        
-        if chat_metrics.get('mean', 0) > 3.0:
-            recommendations.append(
-                "Consider using smaller/faster models for Local Agent"
-            )
-        
-        # Error rate recommendations
-        error_metrics = analysis.get('error_metrics', {})
-        overall_error_rate = error_metrics.get('overall_error_rate', 0)
-        
-        if overall_error_rate > self.thresholds['error_rate']:
-            recommendations.append(
-                "Investigate error sources - error rate exceeds acceptable threshold"
-            )
-        
-        # Resource recommendations
-        resource_metrics = analysis.get('resource_metrics', {})
-        cpu_usage = resource_metrics.get('cpu_usage_percent', 0)
-        memory_usage = resource_metrics.get('memory_usage_percent', 0)
-        
-        if cpu_usage > self.thresholds['cpu_usage']:
-            recommendations.append(
-                "High CPU usage detected - consider horizontal scaling"
-            )
-        
-        if memory_usage > self.thresholds['memory_usage']:
-            recommendations.append(
-                "High memory usage - optimize model caching or increase memory limits"
-            )
-        
-        # Bottleneck recommendations
-        bottlenecks = analysis.get('bottleneck_analysis', [])
-        for bottleneck in bottlenecks:
-            if bottleneck['severity'] == 'high':
-                recommendations.append(f"Critical: {bottleneck['suggested_action']}")
-        
-        return recommendations
-    
-    async def auto_optimize(self) -> Dict:
-        """Automatically apply optimization strategies."""
-        analysis = await self.analyze_performance()
-        applied_optimizations = []
-        
-        # Auto-scaling logic (simplified)
-        resource_metrics = analysis.get('resource_metrics', {})
-        
-        if resource_metrics.get('cpu_usage_percent', 0) > 85:
-            # Trigger scaling up
-            optimization = await self._scale_agents(direction='up')
-            applied_optimizations.append(optimization)
-        elif resource_metrics.get('cpu_usage_percent', 0) < 30:
-            # Trigger scaling down
-            optimization = await self._scale_agents(direction='down')
-            applied_optimizations.append(optimization)
-        
-        # Memory optimization
-        if resource_metrics.get('memory_usage_percent', 0) > 90:
-            optimization = await self._optimize_memory_usage()
-            applied_optimizations.append(optimization)
-        
-        # Cache optimization
-        response_metrics = analysis.get('response_metrics', {})
-        if response_metrics.get('/chat', {}).get('mean', 0) > 6.0:
-            optimization = await self._optimize_caching()
-            applied_optimizations.append(optimization)
-        
-        return {
-            'analysis': analysis,
-            'applied_optimizations': applied_optimizations,
-            'next_analysis_in': 300  # 5 minutes
-        }
-    
-    async def _scale_agents(self, direction: str) -> Dict:
-        """Scale agents up or down."""
-        # This would integrate with Docker Compose or Kubernetes
-        action = f"scale_{direction}"
-        
-        optimization = {
-            'type': 'scaling',
-            'action': action,
-            'timestamp': time.time(),
-            'status': 'simulated',  # In real implementation: 'applied' or 'failed'
-            'details': f"Would {action} DevDuck agents based on resource usage"
-        }
-        
-        self.optimization_actions.append(optimization)
-        return optimization
-    
-    async def _optimize_memory_usage(self) -> Dict:
-        """Optimize memory usage."""
-        optimization = {
-            'type': 'memory_optimization',
-            'action': 'cache_cleanup',
-            'timestamp': time.time(),
-            'status': 'simulated',
-            'details': 'Would clear model cache and optimize memory allocation'
-        }
-        
-        self.optimization_actions.append(optimization)
-        return optimization
-    
-    async def _optimize_caching(self) -> Dict:
-        """Optimize caching strategy."""
-        optimization = {
-            'type': 'cache_optimization',
-            'action': 'increase_cache_size',
-            'timestamp': time.time(),
-            'status': 'simulated',
-            'details': 'Would increase cache TTL and size to improve response times'
-        }
-        
-        self.optimization_actions.append(optimization)
-        return optimization
-    
-    def get_optimization_report(self) -> Dict:
-        """Get comprehensive optimization report."""
-        recent_analyses = self.metrics_history[-10:] if len(self.metrics_history) >= 10 else self.metrics_history
-        recent_optimizations = self.optimization_actions[-5:] if len(self.optimization_actions) >= 5 else self.optimization_actions
-        
-        # Calculate trends
-        response_time_trend = []
-        error_rate_trend = []
-        
-        for analysis in recent_analyses:
-            chat_metrics = analysis.get('response_metrics', {}).get('/chat', {})
-            if 'mean' in chat_metrics:
-                response_time_trend.append(chat_metrics['mean'])
+            # Count keys by type
+            key_counts = {}
+            for cache_type, prefix in self.prefixes.items():
+                pattern = f"{prefix}*"
+                keys = self.redis_client.keys(pattern)
+                key_counts[cache_type] = len(keys)
             
-            error_metrics = analysis.get('error_metrics', {})
-            if 'overall_error_rate' in error_metrics:
-                error_rate_trend.append(error_metrics['overall_error_rate'])
-        
-        return {
-            'current_performance': recent_analyses[-1] if recent_analyses else None,
-            'performance_trends': {
-                'response_time_trend': response_time_trend,
-                'error_rate_trend': error_rate_trend,
-                'trend_direction': self._calculate_trend(response_time_trend)
-            },
-            'recent_optimizations': recent_optimizations,
-            'optimization_effectiveness': self._calculate_optimization_effectiveness(),
-            'recommendations': self._get_priority_recommendations()
-        }
+            return {
+                "application_stats": {
+                    "hits": self.stats.hits,
+                    "misses": self.stats.misses,
+                    "total_requests": self.stats.total_requests,
+                    "hit_rate": self.stats.hit_rate
+                },
+                "redis_stats": {
+                    "used_memory": redis_info.get('used_memory_human', 'Unknown'),
+                    "connected_clients": redis_stats.get('connected_clients', 0),
+                    "total_commands_processed": redis_stats.get('total_commands_processed', 0),
+                    "keyspace_hits": redis_stats.get('keyspace_hits', 0),
+                    "keyspace_misses": redis_stats.get('keyspace_misses', 0)
+                },
+                "key_distribution": key_counts,
+                "total_keys": sum(key_counts.values())
+            }
+        except Exception as e:
+            print(f"Error getting cache stats: {e}")
+            return {"error": str(e)}
     
-    def _calculate_trend(self, values: List[float]) -> str:
-        """Calculate trend direction."""
-        if len(values) < 3:
-            return 'insufficient_data'
-        
-        recent_avg = statistics.mean(values[-3:])
-        earlier_avg = statistics.mean(values[:-3]) if len(values) > 3 else values[0]
-        
-        if recent_avg > earlier_avg * 1.1:
-            return 'worsening'
-        elif recent_avg < earlier_avg * 0.9:
-            return 'improving'
-        else:
-            return 'stable'
-    
-    def _calculate_optimization_effectiveness(self) -> str:
-        """Calculate how effective recent optimizations have been."""
-        if len(self.optimization_actions) < 2 or len(self.metrics_history) < 5:
-            return 'insufficient_data'
-        
-        # Simplified effectiveness calculation
-        # In practice, this would compare metrics before and after optimizations
-        return 'moderate'  # 'high', 'moderate', 'low'
-    
-    def _get_priority_recommendations(self) -> List[Dict]:
-        """Get prioritized recommendations."""
-        if not self.metrics_history:
-            return []
-        
-        latest_analysis = self.metrics_history[-1]
-        recommendations = latest_analysis.get('optimization_recommendations', [])
-        
-        # Prioritize recommendations
-        priority_recommendations = []
-        
-        for rec in recommendations:
-            priority = 'medium'
-            if 'Critical' in rec or 'high' in rec.lower():
-                priority = 'high'
-            elif 'consider' in rec.lower() or 'optimize' in rec.lower():
-                priority = 'low'
+    def cleanup_expired_keys(self) -> int:
+        """Cleanup expired keys (manual cleanup for testing)."""
+        try:
+            # This is a simplified cleanup - Redis handles expiration automatically
+            # But we can manually clean up keys that should have expired
+            cleaned = 0
+            for cache_type, prefix in self.prefixes.items():
+                pattern = f"{prefix}*"
+                keys = self.redis_client.keys(pattern)
+                
+                for key in keys:
+                    ttl = self.redis_client.ttl(key)
+                    if ttl == -2:  # Key doesn't exist
+                        cleaned += 1
             
-            priority_recommendations.append({
-                'recommendation': rec,
-                'priority': priority,
-                'estimated_impact': 'medium'  # This would be calculated based on historical data
-            })
-        
-        # Sort by priority
-        priority_order = {'high': 3, 'medium': 2, 'low': 1}
-        priority_recommendations.sort(key=lambda x: priority_order[x['priority']], reverse=True)
-        
-        return priority_recommendations[:5]  # Top 5 recommendations
+            return cleaned
+        except Exception as e:
+            print(f"Cleanup error: {e}")
+            return 0
+
+# Cache decorator for automatic caching
+def cache_result(cache_manager: AdvancedCacheManager, cache_type: str = "misc", ttl: int = 300):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            # Generate cache key from function name and arguments
+            func_signature = f"{func.__name__}:{str(args)}:{str(sorted(kwargs.items()))}"
+            cache_key = hashlib.md5(func_signature.encode()).hexdigest()
+            
+            # Try to get from cache first
+            cached_result = cache_manager.get(cache_type, cache_key)
+            if cached_result is not None:
+                return cached_result
+            
+            # Execute function and cache result
+            result = func(*args, **kwargs)
+            cache_manager.set(cache_type, cache_key, result, ttl)
+            
+            return result
+        return wrapper
+    return decorator
 
 # Example usage
-async def main():
-    optimizer = PerformanceOptimizer()
-    
-    print("⚡ Running Performance Analysis")
-    print("=" * 35)
-    
-    # Run analysis
-    analysis = await optimizer.analyze_performance()
-    
-    print("📊 Performance Analysis Results:")
-    print(f"Response Times: {analysis.get('response_metrics', {}).get('/chat', {}).get('mean', 'N/A')}")
-    print(f"Error Rate: {analysis.get('error_metrics', {}).get('overall_error_rate', 'N/A')}")
-    print(f"CPU Usage: {analysis.get('resource_metrics', {}).get('cpu_usage_percent', 'N/A')}%")
-    
-    print("\n💡 Recommendations:")
-    for i, rec in enumerate(analysis.get('optimization_recommendations', []), 1):
-        print(f"  {i}. {rec}")
-    
-    # Run auto-optimization
-    print("\n🔧 Running Auto-Optimization...")
-    optimization_result = await optimizer.auto_optimize()
-    
-    print("Applied Optimizations:")
-    for opt in optimization_result['applied_optimizations']:
-        print(f"  - {opt['type']}: {opt['details']}")
-
 if __name__ == '__main__':
-    asyncio.run(main())
+    # Initialize cache manager
+    cache = AdvancedCacheManager()
+    
+    # Test basic caching
+    print("🗄️ Testing Advanced Cache Manager")
+    print("=" * 40)
+    
+    # Cache a conversation response
+    cache.cache_conversation_response(
+        "conv_123", 
+        "What is Docker?", 
+        "Docker is a containerization platform...", 
+        "local_agent"
+    )
+    
+    # Retrieve cached response
+    cached = cache.get_cached_response("conv_123", "What is Docker?")
+    if cached:
+        print(f"✅ Retrieved cached response from {cached['agent']}")
+        print(f"   Response: {cached['response'][:50]}...")
+    
+    # Test decorator
+    @cache_result(cache, "computation", ttl=600)
+    def expensive_computation(n):
+        print(f"Computing factorial of {n}...")
+        result = 1
+        for i in range(1, n + 1):
+            result *= i
+        return result
+    
+    # First call - will compute and cache
+    result1 = expensive_computation(10)
+    print(f"First call result: {result1}")
+    
+    # Second call - will use cache
+    result2 = expensive_computation(10)
+    print(f"Second call result: {result2}")
+    
+    # Show cache statistics
+    stats = cache.get_cache_stats()
+    print("\n📊 Cache Statistics:")
+    print(json.dumps(stats, indent=2))
 ```
 
 ## Next Steps
 
-Congratulations! You've completed the advanced features section and mastered:
+Congratulations! You've mastered advanced DevDuck features:
 
-- ✅ **Security & Authentication**: API keys, JWT tokens, rate limiting, and security monitoring
-- ✅ **Custom Agent Development**: Building specialized agents for specific tasks
-- ✅ **Production Deployment**: Enterprise-grade deployment with Docker Compose
-- ✅ **Monitoring & Alerting**: Comprehensive monitoring with Prometheus and Grafana
-- ✅ **Performance Optimization**: Advanced optimization techniques and auto-scaling
+- ✅ **Security Implementation**: API authentication, rate limiting, and security monitoring
+- ✅ **Custom Agent Development**: Built specialized agents for specific tasks
+- ✅ **Enterprise Deployment**: Kubernetes deployment with auto-scaling
+- ✅ **Performance Optimization**: Advanced caching and monitoring strategies
+- ✅ **Production Best Practices**: Security hardening and operational excellence
 
-In the final section, you'll learn troubleshooting techniques, get guidance on common issues, and discover paths for further learning and development.
+In the final section, you'll learn comprehensive troubleshooting techniques, common issues and solutions, and explore next steps for extending your multi-agent system.
 
-Ready for the final lab? Let's wrap up with troubleshooting and next steps! 🏁
+Ready for the final challenge? Let's master troubleshooting and future planning! 🚀🔧
 
 ---
 
-!!! success "Advanced Features Mastery"
-    You now have the knowledge to deploy, secure, monitor, and optimize production-grade multi-agent systems. These skills will serve you well in building enterprise-scale AI applications.
+!!! success "Advanced Mastery Achieved"
+    You're now equipped with enterprise-grade knowledge for deploying and managing sophisticated multi-agent systems. These patterns will serve you well in production environments.

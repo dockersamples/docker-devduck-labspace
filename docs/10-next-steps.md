@@ -1,1164 +1,1186 @@
 # Troubleshooting & Next Steps
 
-Congratulations on completing your journey through the Docker DevDuck Multi-Agent Workshop! This final lab focuses on troubleshooting common issues, debugging techniques, and charting your path forward with multi-agent systems.
+Congratulations on completing the Docker DevDuck Multi-Agent Workshop! This final lab covers comprehensive troubleshooting techniques, common issues and solutions, performance optimization, and exciting possibilities for extending your multi-agent system.
 
 !!! info "Workshop Completion"
-    By now you've mastered multi-agent system architecture, deployment, monitoring, and optimization. This section helps you handle real-world challenges and continue learning.
+    This section consolidates your learning with practical troubleshooting skills and provides a roadmap for continued development.
 
-## Common Issues & Solutions
+## Comprehensive Troubleshooting Guide
 
-### 🔧 Troubleshooting Guide
+### 🔧 Common Issues and Solutions
 
-#### Issue 1: Container Startup Failures
+#### Issue 1: Agent Communication Failures
 
 **Symptoms:**
-- Containers exit immediately after starting
-- "Model too big" errors
-- Memory allocation failures
-- Port binding conflicts
+- Agents not responding to requests
+- Timeout errors in logs
+- "Agent unavailable" messages
 
 **Diagnostic Steps:**
 
 ```bash
-# Check container status and logs
+# Create comprehensive diagnostics script
+cat > diagnose_agents.sh << 'EOF'
+#!/bin/bash
+
+echo "🔍 DevDuck Multi-Agent System Diagnostics"
+echo "=========================================="
+
+# 1. Check container status
+echo "\n📦 Container Status:"
 docker compose ps
-docker compose logs devduck-agent
 
-# Check system resources
-docker system df
-docker stats --no-stream
+# 2. Check container logs for errors
+echo "\n📋 Recent Error Logs:"
+docker compose logs --tail=50 devduck-agent | grep -i "error\|exception\|failed\|timeout"
 
-# Verify port availability
-netstat -tuln | grep 8000
-lsof -i :8000
+# 3. Test network connectivity
+echo "\n🌐 Network Connectivity:"
+docker compose exec devduck-agent ping -c 3 mcp-gateway 2>/dev/null && echo "✅ MCP Gateway reachable" || echo "❌ MCP Gateway unreachable"
+
+# 4. Check API endpoints
+echo "\n🔗 API Health Checks:"
+curl -s -f http://localhost:8000/health > /dev/null && echo "✅ Main API healthy" || echo "❌ Main API unhealthy"
+
+# 5. Check resource usage
+echo "\n💾 Resource Usage:"
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}"
+
+# 6. Check disk space
+echo "\n💿 Disk Space:"
+df -h | head -1
+df -h | grep -E "(/$|/var|/tmp)"
+
+# 7. Test external API connectivity
+echo "\n🌍 External API Connectivity:"
+curl -s -I https://api.cerebras.ai > /dev/null && echo "✅ Cerebras API reachable" || echo "❌ Cerebras API unreachable"
+
+# 8. Check environment variables
+echo "\n🔑 Environment Configuration:"
+docker compose exec devduck-agent env | grep -E "(CEREBRAS|LOCAL_MODEL|DEBUG|LOG_LEVEL)" | sed 's/CEREBRAS_API_KEY=.*/CEREBRAS_API_KEY=***REDACTED***/'
+
+echo "\n📊 Diagnostic Complete!"
+EOF
+
+chmod +x diagnose_agents.sh
+./diagnose_agents.sh
 ```
 
 **Solutions:**
 
 ```bash
-# Create troubleshooting script
-cat > troubleshoot-startup.sh << 'EOF'
-#!/bin/bash
+# Fix network issues
+docker network prune
+docker compose down && docker compose up -d
 
-echo "🔍 DevDuck Startup Troubleshooting"
-echo "=================================="
+# Restart individual services
+docker compose restart devduck-agent
+docker compose restart mcp-gateway
 
-# Check Docker daemon
-if ! docker info >/dev/null 2>&1; then
-    echo "❌ Docker daemon not running"
-    echo "   Solution: Start Docker Desktop or systemctl start docker"
-    exit 1
-fi
+# Check and fix DNS resolution
+echo "127.0.0.1 localhost" | docker compose exec -T devduck-agent tee -a /etc/hosts
 
-# Check available memory
-MEM_AVAILABLE=$(free -m | awk 'NR==2{print $7}')
-echo "💾 Available Memory: ${MEM_AVAILABLE}MB"
-
-if [ "$MEM_AVAILABLE" -lt 4000 ]; then
-    echo "⚠️  Low memory detected"
-    echo "   Recommended: At least 4GB available memory"
-    echo "   Solutions:"
-    echo "     - Close other applications"
-    echo "     - Use smaller model: LOCAL_MODEL_NAME=microsoft/DialoGPT-small"
-    echo "     - Increase Docker memory limit"
-fi
-
-# Check disk space
-DISK_AVAILABLE=$(df -BG . | awk 'NR==2{print $4}' | sed 's/G//')
-echo "💿 Available Disk: ${DISK_AVAILABLE}GB"
-
-if [ "$DISK_AVAILABLE" -lt 10 ]; then
-    echo "⚠️  Low disk space"
-    echo "   Solutions:"
-    echo "     - Clean Docker: docker system prune -a"
-    echo "     - Remove unused volumes: docker volume prune"
-fi
-
-# Check port conflicts
-PORT_IN_USE=$(netstat -tuln 2>/dev/null | grep ':8000 ' | wc -l)
-if [ "$PORT_IN_USE" -gt 0 ]; then
-    echo "⚠️  Port 8000 is already in use"
-    echo "   Solutions:"
-    echo "     - Stop conflicting service: lsof -ti:8000 | xargs kill"
-    echo "     - Use different port: modify compose.yml ports section"
-fi
-
-# Check environment variables
-if [ -z "$CEREBRAS_API_KEY" ] && [ ! -f ".env" ]; then
-    echo "⚠️  No Cerebras API key found"
-    echo "   Solutions:"
-    echo "     - Create .env file with CEREBRAS_API_KEY=your_key"
-    echo "     - Export CEREBRAS_API_KEY=your_key"
-fi
-
-# Test container creation
-echo "\n🧪 Testing container creation..."
-TEST_CONTAINER=$(docker run --rm -d --name devduck-test python:3.11-slim sleep 10)
-if [ $? -eq 0 ]; then
-    echo "✅ Container creation successful"
-    docker stop devduck-test >/dev/null 2>&1
-else
-    echo "❌ Container creation failed"
-    echo "   Check Docker installation and permissions"
-fi
-
-echo "\n📋 Quick Fixes:"
-echo "1. Restart Docker: systemctl restart docker (Linux) or restart Docker Desktop"
-echo "2. Clean system: docker system prune -a && docker volume prune"
-echo "3. Use lightweight model: LOCAL_MODEL_NAME=microsoft/DialoGPT-small"
-echo "4. Check logs: docker compose logs -f devduck-agent"
-echo "5. Rebuild: docker compose up --build --force-recreate"
-
-EOF
-
-chmod +x troubleshoot-startup.sh
-./troubleshoot-startup.sh
+# Rebuild containers if code changes
+docker compose up --build --force-recreate
 ```
 
-#### Issue 2: Agent Communication Failures
+#### Issue 2: Performance Problems
 
 **Symptoms:**
-- "Agent unavailable" messages
-- Timeouts on requests
-- Inconsistent responses
-- Network connectivity errors
+- Slow response times (>30 seconds)
+- High memory usage
+- Agent timeouts
 
-**Debugging Tools:**
+**Performance Analysis Script:**
 
 ```python
-# Create agent_diagnostics.py
+# Create performance_analyzer.py
 import requests
 import time
-import asyncio
-import json
-from typing import Dict, List
+import statistics
+import psutil
+import docker
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-class AgentDiagnostics:
-    def __init__(self, base_url="http://localhost:8000"):
-        self.base_url = base_url
-        self.diagnostic_results = []
+class PerformanceAnalyzer:
+    def __init__(self):
+        self.docker_client = docker.from_env()
+        self.base_url = "http://localhost:8000"
+        self.results = []
     
-    async def run_full_diagnostics(self) -> Dict:
-        """Run comprehensive agent diagnostics."""
-        print("🔬 Running Agent Diagnostics")
-        print("=" * 30)
+    def run_performance_test(self, num_requests=10, concurrent_requests=3):
+        """Run comprehensive performance test."""
+        print(f"🚀 Running Performance Test: {num_requests} requests, {concurrent_requests} concurrent")
+        print("=" * 60)
         
-        diagnostics = {
-            "timestamp": time.time(),
-            "tests": {}
-        }
-        
-        # Test suite
-        test_functions = [
-            ("connectivity", self.test_connectivity),
-            ("health_check", self.test_health_endpoint),
-            ("basic_chat", self.test_basic_chat),
-            ("agent_routing", self.test_agent_routing),
-            ("error_handling", self.test_error_handling),
-            ("performance", self.test_performance),
-            ("concurrent_requests", self.test_concurrent_requests)
+        # Test scenarios
+        test_scenarios = [
+            {"query": "Hello", "expected_agent": "local", "category": "simple"},
+            {"query": "What is Python?", "expected_agent": "local", "category": "simple"},
+            {"query": "Explain machine learning concepts in detail", "expected_agent": "cerebras", "category": "complex"},
+            {"query": "Design a scalable microservices architecture", "expected_agent": "cerebras", "category": "complex"}
         ]
         
-        for test_name, test_func in test_functions:
-            print(f"\n🧪 Running {test_name} test...")
-            try:
-                result = await test_func()
-                diagnostics["tests"][test_name] = result
-                status = "✅ PASS" if result.get("success") else "❌ FAIL"
-                print(f"   {status}: {result.get('message', 'No message')}")
-            except Exception as e:
-                diagnostics["tests"][test_name] = {
-                    "success": False,
-                    "error": str(e),
-                    "message": f"Test failed with exception: {e}"
-                }
-                print(f"   ❌ ERROR: {e}")
+        # System baseline
+        baseline_stats = self._get_system_stats()
+        print(f"📊 Baseline - CPU: {baseline_stats['cpu']:.1f}%, Memory: {baseline_stats['memory']:.1f}%")
+        
+        # Run tests
+        start_time = time.time()
+        
+        with ThreadPoolExecutor(max_workers=concurrent_requests) as executor:
+            futures = []
             
-            # Small delay between tests
-            await asyncio.sleep(1)
-        
-        # Generate summary
-        diagnostics["summary"] = self.generate_summary(diagnostics["tests"])
-        
-        return diagnostics
-    
-    async def test_connectivity(self) -> Dict:
-        """Test basic network connectivity."""
-        try:
-            response = requests.get(f"{self.base_url}/", timeout=10)
-            return {
-                "success": response.status_code in [200, 404],  # 404 is OK if no root route
-                "status_code": response.status_code,
-                "response_time": response.elapsed.total_seconds(),
-                "message": f"Connection established (HTTP {response.status_code})"
-            }
-        except requests.exceptions.ConnectionError:
-            return {
-                "success": False,
-                "message": "Connection refused - check if service is running",
-                "suggestion": "Run 'docker compose ps' to check container status"
-            }
-        except requests.exceptions.Timeout:
-            return {
-                "success": False,
-                "message": "Connection timeout - service may be overloaded",
-                "suggestion": "Check 'docker compose logs' for errors"
-            }
-    
-    async def test_health_endpoint(self) -> Dict:
-        """Test health check endpoint."""
-        try:
-            response = requests.get(f"{self.base_url}/health", timeout=10)
+            for i in range(num_requests):
+                scenario = test_scenarios[i % len(test_scenarios)]
+                future = executor.submit(self._make_request, scenario, i)
+                futures.append(future)
             
-            if response.status_code == 200:
-                health_data = response.json()
-                return {
-                    "success": True,
-                    "message": f"Health check passed: {health_data.get('status', 'OK')}",
-                    "health_data": health_data,
-                    "response_time": response.elapsed.total_seconds()
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": f"Health check failed: HTTP {response.status_code}",
-                    "suggestion": "Check application logs for errors"
-                }
+            # Collect results
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    self.results.append(result)
         
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"Health check error: {e}",
-                "suggestion": "Ensure /health endpoint is implemented"
-            }
+        total_time = time.time() - start_time
+        
+        # Analyze results
+        self._analyze_results(total_time, baseline_stats)
     
-    async def test_basic_chat(self) -> Dict:
-        """Test basic chat functionality."""
-        test_message = {
-            "message": "Hello, this is a test message",
-            "conversation_id": f"diagnostic-{int(time.time())}"
-        }
+    def _make_request(self, scenario, request_id):
+        """Make a single request and measure performance."""
+        start_time = time.time()
         
         try:
-            start_time = time.time()
             response = requests.post(
                 f"{self.base_url}/chat",
-                json=test_message,
-                timeout=30
+                json={
+                    "message": scenario["query"],
+                    "conversation_id": f"perf-test-{request_id}"
+                },
+                timeout=45
             )
-            response_time = time.time() - start_time
+            
+            duration = time.time() - start_time
             
             if response.status_code == 200:
                 response_data = response.json()
                 return {
+                    "request_id": request_id,
+                    "scenario": scenario["category"],
+                    "duration": duration,
+                    "response_length": len(response_data.get("response", "")),
                     "success": True,
-                    "message": "Basic chat functionality working",
-                    "response_time": response_time,
-                    "response_length": len(response_data.get("response", ""))
+                    "status_code": response.status_code
                 }
             else:
                 return {
+                    "request_id": request_id,
+                    "scenario": scenario["category"],
+                    "duration": duration,
                     "success": False,
-                    "message": f"Chat request failed: HTTP {response.status_code}",
-                    "response_body": response.text[:200]
+                    "status_code": response.status_code
                 }
-        
+                
         except Exception as e:
             return {
+                "request_id": request_id,
+                "scenario": scenario["category"],
+                "duration": time.time() - start_time,
                 "success": False,
-                "message": f"Chat test error: {e}",
-                "suggestion": "Check if chat endpoint is properly configured"
+                "error": str(e)
             }
     
-    async def test_agent_routing(self) -> Dict:
-        """Test agent routing functionality."""
-        routing_tests = [
-            {
-                "message": "Quick question: what is Python?",
-                "expected_agent": "local",
-                "description": "Simple query should route to local agent"
-            },
-            {
-                "message": "Design a scalable microservices architecture for an e-commerce platform",
-                "expected_agent": "cerebras",
-                "description": "Complex query should route to Cerebras agent"
+    def _get_system_stats(self):
+        """Get current system statistics."""
+        try:
+            return {
+                "cpu": psutil.cpu_percent(interval=1),
+                "memory": psutil.virtual_memory().percent,
+                "disk": psutil.disk_usage('/').percent
             }
-        ]
-        
-        results = []
-        
-        for test in routing_tests:
-            try:
-                start_time = time.time()
-                response = requests.post(
-                    f"{self.base_url}/chat",
-                    json={
-                        "message": test["message"],
-                        "conversation_id": f"routing-test-{int(time.time())}"
-                    },
-                    timeout=45
-                )
-                response_time = time.time() - start_time
-                
-                # Heuristic to detect which agent was used
-                detected_agent = "cerebras" if response_time > 5 or len(response.json().get("response", "")) > 500 else "local"
-                
-                results.append({
-                    "test": test["description"],
-                    "expected": test["expected_agent"],
-                    "detected": detected_agent,
-                    "response_time": response_time,
-                    "correct": detected_agent == test["expected_agent"]
-                })
-                
-            except Exception as e:
-                results.append({
-                    "test": test["description"],
-                    "error": str(e)
-                })
-        
-        successful_routes = sum(1 for r in results if r.get("correct", False))
-        
-        return {
-            "success": successful_routes > 0,
-            "message": f"Routing tests: {successful_routes}/{len(results)} passed",
-            "results": results
-        }
+        except:
+            return {"cpu": 0, "memory": 0, "disk": 0}
     
-    async def test_error_handling(self) -> Dict:
-        """Test error handling and recovery."""
-        error_tests = [
-            {
-                "test": "malformed_request",
-                "data": "invalid json",
-                "headers": {"Content-Type": "application/json"}
-            },
-            {
-                "test": "empty_message",
-                "data": {"message": "", "conversation_id": "test"}
-            },
-            {
-                "test": "very_long_message",
-                "data": {"message": "x" * 10000, "conversation_id": "test"}
-            }
-        ]
+    def _analyze_results(self, total_time, baseline_stats):
+        """Analyze performance test results."""
+        if not self.results:
+            print("❌ No results to analyze")
+            return
         
-        results = []
+        # Success rate
+        successful = [r for r in self.results if r["success"]]
+        success_rate = len(successful) / len(self.results)
         
-        for test in error_tests:
-            try:
-                if isinstance(test["data"], str):
-                    # Test malformed JSON
-                    response = requests.post(
-                        f"{self.base_url}/chat",
-                        data=test["data"],
-                        headers=test.get("headers", {}),
-                        timeout=10
-                    )
-                else:
-                    response = requests.post(
-                        f"{self.base_url}/chat",
-                        json=test["data"],
-                        timeout=30
-                    )
-                
-                # Good error handling should return 4xx status codes
-                graceful_error = 400 <= response.status_code < 500
-                
-                results.append({
-                    "test": test["test"],
-                    "status_code": response.status_code,
-                    "graceful_error": graceful_error
-                })
-                
-            except Exception as e:
-                results.append({
-                    "test": test["test"],
-                    "exception": str(e)
-                })
-        
-        graceful_errors = sum(1 for r in results if r.get("graceful_error", False))
-        
-        return {
-            "success": graceful_errors >= len(results) // 2,  # At least half should be graceful
-            "message": f"Error handling: {graceful_errors}/{len(results)} tests handled gracefully",
-            "results": results
-        }
-    
-    async def test_performance(self) -> Dict:
-        """Test basic performance metrics."""
-        response_times = []
-        
-        # Run 5 performance tests
-        for i in range(5):
-            try:
-                start_time = time.time()
-                response = requests.post(
-                    f"{self.base_url}/chat",
-                    json={
-                        "message": f"Performance test {i+1}: Hello DevDuck!",
-                        "conversation_id": f"perf-test-{i}"
-                    },
-                    timeout=30
-                )
-                response_time = time.time() - start_time
-                response_times.append(response_time)
-                
-            except Exception as e:
-                response_times.append(30.0)  # Timeout value
+        # Response times
+        response_times = [r["duration"] for r in successful]
         
         if response_times:
-            avg_time = sum(response_times) / len(response_times)
-            max_time = max(response_times)
+            avg_response_time = statistics.mean(response_times)
+            median_response_time = statistics.median(response_times)
+            min_response_time = min(response_times)
+            max_response_time = max(response_times)
             
-            return {
-                "success": avg_time < 15.0,  # Average should be under 15 seconds
-                "message": f"Performance: avg {avg_time:.2f}s, max {max_time:.2f}s",
-                "avg_response_time": avg_time,
-                "max_response_time": max_time,
-                "all_response_times": response_times
-            }
+            # Percentiles
+            p90_response_time = statistics.quantiles(response_times, n=10)[8] if len(response_times) >= 10 else max_response_time
+            p95_response_time = statistics.quantiles(response_times, n=20)[18] if len(response_times) >= 20 else max_response_time
         else:
-            return {
-                "success": False,
-                "message": "Performance test failed - no successful responses"
-            }
+            avg_response_time = median_response_time = min_response_time = max_response_time = 0
+            p90_response_time = p95_response_time = 0
+        
+        # Throughput
+        throughput = len(self.results) / total_time
+        
+        # Category breakdown
+        category_stats = {}
+        for result in successful:
+            category = result["scenario"]
+            if category not in category_stats:
+                category_stats[category] = []
+            category_stats[category].append(result["duration"])
+        
+        # Final system stats
+        final_stats = self._get_system_stats()
+        
+        # Print results
+        print("\n📈 Performance Test Results")
+        print("=" * 30)
+        print(f"Total Requests: {len(self.results)}")
+        print(f"Successful Requests: {len(successful)}")
+        print(f"Success Rate: {success_rate:.1%}")
+        print(f"Total Time: {total_time:.2f}s")
+        print(f"Throughput: {throughput:.2f} req/s")
+        
+        print("\n⏱️ Response Time Statistics:")
+        print(f"  Average: {avg_response_time:.2f}s")
+        print(f"  Median: {median_response_time:.2f}s")
+        print(f"  Min: {min_response_time:.2f}s")
+        print(f"  Max: {max_response_time:.2f}s")
+        print(f"  90th Percentile: {p90_response_time:.2f}s")
+        print(f"  95th Percentile: {p95_response_time:.2f}s")
+        
+        print("\n📊 Performance by Category:")
+        for category, times in category_stats.items():
+            avg_time = statistics.mean(times)
+            print(f"  {category.title()}: {avg_time:.2f}s avg ({len(times)} requests)")
+        
+        print("\n💻 System Resource Usage:")
+        print(f"  Baseline CPU: {baseline_stats['cpu']:.1f}% → Final: {final_stats['cpu']:.1f}%")
+        print(f"  Baseline Memory: {baseline_stats['memory']:.1f}% → Final: {final_stats['memory']:.1f}%")
+        
+        # Performance recommendations
+        print("\n💡 Performance Recommendations:")
+        if avg_response_time > 10:
+            print("  ⚠️  High average response time - consider scaling up")
+        if success_rate < 0.95:
+            print("  ⚠️  Low success rate - check error handling")
+        if final_stats['cpu'] > 80:
+            print("  ⚠️  High CPU usage - consider horizontal scaling")
+        if final_stats['memory'] > 85:
+            print("  ⚠️  High memory usage - check for memory leaks")
+        if avg_response_time < 3 and success_rate > 0.98:
+            print("  ✅ Excellent performance - system is well optimized")
     
-    async def test_concurrent_requests(self) -> Dict:
-        """Test handling of concurrent requests."""
-        import asyncio
-        import aiohttp
+    def generate_performance_report(self, filename="performance_report.json"):
+        """Generate detailed performance report."""
+        import json
         
-        async def send_request(session, request_id):
-            try:
-                async with session.post(
-                    f"{self.base_url}/chat",
-                    json={
-                        "message": f"Concurrent test {request_id}",
-                        "conversation_id": f"concurrent-{request_id}"
-                    },
-                    timeout=30
-                ) as response:
-                    return {
-                        "id": request_id,
-                        "status": response.status,
-                        "success": response.status == 200
-                    }
-            except Exception as e:
-                return {
-                    "id": request_id,
-                    "error": str(e),
-                    "success": False
-                }
+        successful = [r for r in self.results if r["success"]]
+        response_times = [r["duration"] for r in successful]
         
-        # Send 5 concurrent requests
-        async with aiohttp.ClientSession() as session:
-            tasks = [send_request(session, i) for i in range(5)]
-            results = await asyncio.gather(*tasks)
-        
-        successful_requests = sum(1 for r in results if r.get("success", False))
-        
-        return {
-            "success": successful_requests >= 3,  # At least 3 out of 5 should succeed
-            "message": f"Concurrent requests: {successful_requests}/5 successful",
-            "results": results
+        report = {
+            "test_summary": {
+                "total_requests": len(self.results),
+                "successful_requests": len(successful),
+                "success_rate": len(successful) / max(1, len(self.results)),
+                "test_timestamp": time.time()
+            },
+            "performance_metrics": {
+                "avg_response_time": statistics.mean(response_times) if response_times else 0,
+                "median_response_time": statistics.median(response_times) if response_times else 0,
+                "min_response_time": min(response_times) if response_times else 0,
+                "max_response_time": max(response_times) if response_times else 0
+            },
+            "detailed_results": self.results,
+            "system_info": self._get_system_stats()
         }
-    
-    def generate_summary(self, test_results: Dict) -> Dict:
-        """Generate diagnostic summary."""
-        total_tests = len(test_results)
-        passed_tests = sum(1 for test in test_results.values() if test.get("success", False))
         
-        # Determine overall health
-        health_score = passed_tests / total_tests if total_tests > 0 else 0
+        with open(filename, 'w') as f:
+            json.dump(report, f, indent=2)
         
-        if health_score >= 0.8:
-            overall_status = "healthy"
-            status_emoji = "✅"
-        elif health_score >= 0.6:
-            overall_status = "warning"
-            status_emoji = "⚠️"
-        else:
-            overall_status = "critical"
-            status_emoji = "❌"
-        
-        # Generate recommendations
-        recommendations = []
-        
-        for test_name, result in test_results.items():
-            if not result.get("success", True):
-                suggestion = result.get("suggestion")
-                if suggestion:
-                    recommendations.append(f"{test_name}: {suggestion}")
-        
-        return {
-            "overall_status": overall_status,
-            "status_emoji": status_emoji,
-            "health_score": health_score,
-            "tests_passed": passed_tests,
-            "total_tests": total_tests,
-            "recommendations": recommendations
-        }
-    
-    def print_diagnostic_report(self, diagnostics: Dict):
-        """Print formatted diagnostic report."""
-        summary = diagnostics["summary"]
-        
-        print(f"\n{summary['status_emoji']} DIAGNOSTIC REPORT")
-        print("=" * 25)
-        print(f"Overall Status: {summary['overall_status'].upper()}")
-        print(f"Health Score: {summary['health_score']:.1%}")
-        print(f"Tests Passed: {summary['tests_passed']}/{summary['total_tests']}")
-        
-        if summary['recommendations']:
-            print("\n🔧 Recommendations:")
-            for i, rec in enumerate(summary['recommendations'], 1):
-                print(f"  {i}. {rec}")
-        
-        print("\n📋 Detailed Results:")
-        for test_name, result in diagnostics["tests"].items():
-            status = "✅" if result.get("success") else "❌"
-            print(f"  {status} {test_name}: {result.get('message', 'No message')}")
+        print(f"📄 Performance report saved to {filename}")
 
-# Example usage
-async def main():
-    diagnostics = AgentDiagnostics()
-    
-    try:
-        results = await diagnostics.run_full_diagnostics()
-        diagnostics.print_diagnostic_report(results)
-        
-        # Save results to file
-        with open("diagnostic_report.json", "w") as f:
-            json.dump(results, f, indent=2)
-        
-        print("\n💾 Full diagnostic report saved to: diagnostic_report.json")
-        
-    except KeyboardInterrupt:
-        print("\n🛑 Diagnostics interrupted by user")
-    except Exception as e:
-        print(f"\n❌ Diagnostics failed: {e}")
-
+# Run performance analysis
 if __name__ == '__main__':
-    asyncio.run(main())
+    analyzer = PerformanceAnalyzer()
+    analyzer.run_performance_test(num_requests=20, concurrent_requests=5)
+    analyzer.generate_performance_report()
 ```
 
-#### Issue 3: Performance Problems
+#### Issue 3: Model Loading Problems
 
 **Symptoms:**
-- Slow response times
-- High memory usage
-- CPU spikes
-- System freezing
+- "Model not found" errors
+- Container crashes during startup
+- Out of memory errors
 
-**Performance Debugging:**
+**Model Management Script:**
 
 ```bash
-# Create performance debugging script
-cat > debug-performance.sh << 'EOF'
+# Create model_manager.sh
+cat > model_manager.sh << 'EOF'
 #!/bin/bash
 
-echo "⚡ Performance Debugging Tool"
+echo "🤖 DevDuck Model Management Tool"
 echo "=============================="
 
-# System resource check
-echo "\n🖥️  System Resources:"
-echo "CPU Usage:"
-top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print "  " 100 - $1"%"}'
+# Configuration
+MODEL_CACHE_DIR="/tmp/devduck_models"
+DOCKER_VOLUME="devduck-model-cache"
 
-echo "Memory Usage:"
-free -h | awk 'NR==2{printf "  Used: %s/%s (%.2f%%)\n", $3, $2, $3*100/$2}'
-
-echo "Disk Usage:"
-df -h . | awk 'NR==2{printf "  Used: %s/%s (%s)\n", $3, $2, $5}'
-
-# Docker resource usage
-echo "\n🐳 Docker Resource Usage:"
-docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}"
-
-# Container performance analysis
-echo "\n📊 Container Performance Analysis:"
-for container in $(docker ps --format "{{.Names}}" | grep devduck); do
-    echo "\n📦 $container:"
+# Function to check model status
+check_model_status() {
+    echo "\n📋 Current Model Status:"
     
-    # Get container stats
-    STATS=$(docker stats $container --no-stream --format "{{.CPUPerc}} {{.MemUsage}}")
-    echo "  Resource Usage: $STATS"
-    
-    # Check container health
-    HEALTH=$(docker inspect $container --format="{{.State.Health.Status}}" 2>/dev/null || echo "no healthcheck")
-    echo "  Health: $HEALTH"
-    
-    # Check restart count
-    RESTARTS=$(docker inspect $container --format="{{.RestartCount}}" 2>/dev/null || echo "0")
-    echo "  Restarts: $RESTARTS"
-    
-    # Check log for errors
-    ERROR_COUNT=$(docker logs $container --since 1h 2>&1 | grep -i error | wc -l)
-    echo "  Recent Errors: $ERROR_COUNT"
-done
-
-# Performance recommendations
-echo "\n💡 Performance Recommendations:"
-
-# Check available memory
-MEM_AVAILABLE=$(free -m | awk 'NR==2{print $7}')
-if [ "$MEM_AVAILABLE" -lt 2000 ]; then
-    echo "  ⚠️  Low memory: Consider using smaller models or increasing system RAM"
-fi
-
-# Check CPU usage
-CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')
-if (( $(echo "$CPU_USAGE > 80" | bc -l) )); then
-    echo "  ⚠️  High CPU usage: Consider scaling down or optimizing workload"
-fi
-
-# Check disk I/O
-IO_WAIT=$(top -bn1 | grep "Cpu(s)" | grep -o '[0-9.]*%wa' | sed 's/%wa//')
-if (( $(echo "$IO_WAIT > 10" | bc -l) )); then
-    echo "  ⚠️  High I/O wait: Check disk performance and model loading"
-fi
-
-echo "\n🔧 Quick Performance Fixes:"
-echo "1. Restart containers: docker compose restart"
-echo "2. Clean Docker cache: docker system prune -f"
-echo "3. Use smaller model: LOCAL_MODEL_NAME=microsoft/DialoGPT-small"
-echo "4. Increase memory limits in compose.yml"
-echo "5. Monitor with: watch docker stats"
-
-EOF
-
-chmod +x debug-performance.sh
-./debug-performance.sh
-```
-
-## Advanced Debugging Techniques
-
-### 🔍 Deep Debugging Tools
-
-#### Container Introspection
-
-```bash
-# Create debugging toolkit
-cat > debug-toolkit.sh << 'EOF'
-#!/bin/bash
-
-echo "🛠️  DevDuck Debug Toolkit"
-echo "========================"
-
-# Function to debug a specific container
-debug_container() {
-    local container_name="$1"
-    echo "\n🔍 Debugging container: $container_name"
-    
-    if ! docker ps | grep -q "$container_name"; then
-        echo "❌ Container $container_name not found or not running"
-        return 1
-    fi
-    
-    echo "\n📋 Container Info:"
-    docker inspect "$container_name" --format="{{.State.Status}}: {{.State.StartedAt}}"
-    
-    echo "\n📊 Resource Usage:"
-    docker stats "$container_name" --no-stream --format "CPU: {{.CPUPerc}}, Memory: {{.MemUsage}}"
-    
-    echo "\n📝 Recent Logs (last 20 lines):"
-    docker logs "$container_name" --tail 20 --timestamps
-    
-    echo "\n🌐 Network Info:"
-    docker exec "$container_name" netstat -tuln 2>/dev/null | head -10 || echo "netstat not available"
-    
-    echo "\n💾 Disk Usage:"
-    docker exec "$container_name" df -h 2>/dev/null | head -5 || echo "df not available"
-    
-    echo "\n🔄 Processes:"
-    docker exec "$container_name" ps aux 2>/dev/null | head -10 || echo "ps not available"
-    
-    echo "\n🔗 Environment Variables:"
-    docker exec "$container_name" env | grep -E "(CEREBRAS|LOCAL|DEBUG|LOG)" | sort
-}
-
-# Function to test connectivity between containers
-test_connectivity() {
-    echo "\n🌐 Testing Inter-Container Connectivity"
-    echo "======================================"
-    
-    local source_container="devduck-agent"
-    local target_services=("mcp-gateway:3000" "postgres:5432" "redis:6379")
-    
-    if docker ps | grep -q "$source_container"; then
-        for target in "${target_services[@]}"; do
-            echo "\n🔍 Testing $source_container -> $target"
-            
-            # Try to connect
-            if docker exec "$source_container" nc -z ${target/:/ } 2>/dev/null; then
-                echo "✅ Connection successful"
-            else
-                echo "❌ Connection failed"
-                
-                # Additional diagnostics
-                host=$(echo $target | cut -d: -f1)
-                if docker exec "$source_container" nslookup "$host" 2>/dev/null >/dev/null; then
-                    echo "   DNS resolution: ✅"
-                else
-                    echo "   DNS resolution: ❌"
-                fi
-            fi
-        done
+    # Check local model cache
+    echo "Local Model Cache:"
+    if docker volume inspect $DOCKER_VOLUME >/dev/null 2>&1; then
+        echo "  ✅ Docker volume exists: $DOCKER_VOLUME"
+        docker run --rm -v $DOCKER_VOLUME:/models alpine du -sh /models/* 2>/dev/null || echo "  📁 Volume is empty"
     else
-        echo "❌ Source container $source_container not found"
+        echo "  ❌ Docker volume missing: $DOCKER_VOLUME"
     fi
+    
+    # Check available system resources
+    echo "\nSystem Resources:"
+    echo "  Available Memory: $(free -h | awk '/^Mem:/{print $7}')" 
+    echo "  Available Disk: $(df -h / | awk 'NR==2{print $4}')"
+    
+    # Check model configuration
+    echo "\nModel Configuration:"
+    docker compose exec devduck-agent env | grep -E "LOCAL_MODEL|MODEL_CACHE" || echo "  ⚠️  No model configuration found"
 }
 
-# Function to check API endpoints
-test_api_endpoints() {
-    echo "\n🚀 Testing API Endpoints"
-    echo "========================"
+# Function to download models
+download_models() {
+    echo "\n⬇️  Downloading Models..."
     
-    local base_url="http://localhost:8000"
-    local endpoints=("/health" "/metrics" "/dev-ui")
+    # Create model cache directory
+    mkdir -p $MODEL_CACHE_DIR
     
-    for endpoint in "${endpoints[@]}"; do
-        echo "\n🔍 Testing $endpoint"
-        
-        response=$(curl -s -w "HTTPSTATUS:%{http_code};TIME:%{time_total}" "$base_url$endpoint" || echo "HTTPSTATUS:000;TIME:timeout")
-        
-        http_code=$(echo "$response" | grep -o "HTTPSTATUS:[0-9]*" | cut -d: -f2)
-        time_total=$(echo "$response" | grep -o "TIME:[0-9.]*" | cut -d: -f2)
-        
-        if [ "$http_code" = "200" ]; then
-            echo "✅ HTTP $http_code (${time_total}s)"
-        elif [ "$http_code" = "000" ]; then
-            echo "❌ Connection failed (timeout)"
-        else
-            echo "⚠️  HTTP $http_code (${time_total}s)"
-        fi
-    done
+    # Download lightweight models for testing
+    cat > download_models.py << 'PYEOF'
+import os
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+models_to_download = [
+    'microsoft/DialoGPT-small',
+    'microsoft/DialoGPT-medium',
+    'gpt2'
+]
+
+cache_dir = '/tmp/devduck_models'
+os.makedirs(cache_dir, exist_ok=True)
+
+for model_name in models_to_download:
+    try:
+        print(f"Downloading {model_name}...")
+        tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
+        model = AutoModelForCausalLM.from_pretrained(model_name, cache_dir=cache_dir)
+        print(f"✅ {model_name} downloaded successfully")
+    except Exception as e:
+        print(f"❌ Failed to download {model_name}: {e}")
+
+print("\n📊 Model Download Summary:")
+for root, dirs, files in os.walk(cache_dir):
+    size = sum(os.path.getsize(os.path.join(root, file)) for file in files)
+    if size > 0:
+        print(f"  {os.path.basename(root)}: {size / (1024*1024*1024):.2f} GB")
+PYEOF
+    
+    python3 download_models.py
+    
+    # Copy to Docker volume
+    echo "\n📦 Copying models to Docker volume..."
+    docker run --rm -v $MODEL_CACHE_DIR:/source -v $DOCKER_VOLUME:/dest alpine cp -r /source/* /dest/
+    
+    echo "✅ Models downloaded and cached"
 }
 
-# Function to analyze logs for common issues
-analyze_logs() {
-    echo "\n📊 Log Analysis"
-    echo "==============="
+# Function to optimize models
+optimize_models() {
+    echo "\n⚡ Optimizing Model Performance..."
     
-    local container_name="$1"
+    # Set optimal model configuration
+    cat > .env.model-optimized << 'ENVEOF'
+# Optimized model configuration
+LOCAL_MODEL_NAME=microsoft/DialoGPT-small
+LOCAL_MODEL_DEVICE=auto
+LOCAL_MODEL_PRECISION=fp16
+LOCAL_MODEL_MAX_LENGTH=512
+TORCH_HOME=/app/models
+HF_HOME=/app/models
+TRANSFORMERS_CACHE=/app/models
+ENVEOF
     
-    if ! docker ps | grep -q "$container_name"; then
-        echo "❌ Container $container_name not found"
-        return 1
-    fi
-    
-    echo "\n🔍 Analyzing logs for $container_name..."
-    
-    # Get logs from last hour
-    local logs=$(docker logs "$container_name" --since 1h 2>&1)
-    
-    # Count different log levels
-    local error_count=$(echo "$logs" | grep -i error | wc -l)
-    local warning_count=$(echo "$logs" | grep -i warning | wc -l)
-    local info_count=$(echo "$logs" | grep -i info | wc -l)
-    
-    echo "Log Summary (last hour):"
-    echo "  Errors: $error_count"
-    echo "  Warnings: $warning_count"
-    echo "  Info: $info_count"
-    
-    if [ "$error_count" -gt 0 ]; then
-        echo "\n❌ Recent Errors:"
-        echo "$logs" | grep -i error | tail -3
-    fi
-    
-    if [ "$warning_count" -gt 5 ]; then
-        echo "\n⚠️  Recent Warnings:"
-        echo "$logs" | grep -i warning | tail -3
-    fi
+    echo "✅ Model optimization configuration created (.env.model-optimized)"
+    echo "📝 To apply: cp .env.model-optimized .env && docker compose up --build"
+}
+
+# Function to troubleshoot model issues
+troubleshoot_models() {
+    echo "\n🔧 Model Troubleshooting:"
     
     # Check for common issues
-    if echo "$logs" | grep -qi "out of memory"; then
-        echo "\n💾 Memory Issue Detected!"
-        echo "   Recommendation: Increase memory limits or use smaller models"
-    fi
+    echo "\n1. Checking model loading errors..."
+    docker compose logs devduck-agent | grep -i "model\|loading\|download" | tail -10
     
-    if echo "$logs" | grep -qi "connection refused"; then
-        echo "\n🌐 Connection Issue Detected!"
-        echo "   Recommendation: Check service dependencies and networking"
-    fi
+    echo "\n2. Checking memory usage during model loading..."
+    docker stats --no-stream devduck-agent 2>/dev/null || echo "   Container not running"
     
-    if echo "$logs" | grep -qi "timeout"; then
-        echo "\n⏱️  Timeout Issue Detected!"
-        echo "   Recommendation: Increase timeout values or check performance"
-    fi
+    echo "\n3. Testing model loading directly..."
+    docker compose exec devduck-agent python3 -c "
+import torch
+print(f'PyTorch version: {torch.__version__}')
+print(f'CUDA available: {torch.cuda.is_available()}')
+print(f'CUDA devices: {torch.cuda.device_count()}')
+try:
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained('gpt2')
+    print('✅ Model loading test successful')
+except Exception as e:
+    print(f'❌ Model loading test failed: {e}')
+" 2>/dev/null || echo "   Cannot test - container not accessible"
+    
+    echo "\n4. Common Solutions:"
+    echo "   - Use smaller models (DialoGPT-small instead of DialoGPT-large)"
+    echo "   - Increase Docker memory allocation to 8GB+"
+    echo "   - Enable model caching to avoid re-downloading"
+    echo "   - Use fp16 precision to reduce memory usage"
+    echo "   - Check internet connectivity for model downloads"
 }
 
-# Main execution
-case "${1:-all}" in
-    "container")
-        debug_container "${2:-devduck-agent}"
+# Main menu
+case "$1" in
+    "status")
+        check_model_status
         ;;
-    "connectivity")
-        test_connectivity
+    "download")
+        download_models
         ;;
-    "api")
-        test_api_endpoints
+    "optimize")
+        optimize_models
         ;;
-    "logs")
-        analyze_logs "${2:-devduck-agent}"
-        ;;
-    "all")
-        debug_container "devduck-agent"
-        test_connectivity
-        test_api_endpoints
-        analyze_logs "devduck-agent"
+    "troubleshoot")
+        troubleshoot_models
         ;;
     *)
-        echo "Usage: $0 [container|connectivity|api|logs|all] [container_name]"
-        echo "\nExamples:"
-        echo "  $0 container devduck-agent"
-        echo "  $0 connectivity"
-        echo "  $0 api"
-        echo "  $0 logs devduck-agent"
-        echo "  $0 all"
+        echo "Usage: $0 {status|download|optimize|troubleshoot}"
+        echo ""
+        echo "Commands:"
+        echo "  status       - Check current model status"
+        echo "  download     - Download and cache models"
+        echo "  optimize     - Create optimized model configuration"
+        echo "  troubleshoot - Diagnose model loading issues"
         ;;
 esac
 
 EOF
 
-chmod +x debug-toolkit.sh
-echo "🛠️  Debug toolkit created! Usage: ./debug-toolkit.sh [option]"
+chmod +x model_manager.sh
+
+# Test the model manager
+echo "🧪 Testing model management:"
+./model_manager.sh status
 ```
 
-## Learning Resources & Next Steps
+### 🚨 Emergency Recovery Procedures
 
-### 📚 Recommended Learning Path
+#### Complete System Reset
 
-#### Beginner to Intermediate (3-6 months)
-
-```markdown
-## 🎯 Learning Roadmap: Multi-Agent Systems Mastery
-
-### Phase 1: Foundation Reinforcement (Month 1)
-- [ ] **Docker Mastery**
-  - Advanced Docker Compose patterns
-  - Multi-stage builds and optimization
-  - Docker Swarm for production orchestration
-  - Security best practices and scanning
-
-- [ ] **Python Advanced Patterns**
-  - Async/await and concurrent programming
-  - Design patterns for distributed systems
-  - Error handling and resilience patterns
-  - Performance profiling and optimization
-
-- [ ] **API Design & Development**
-  - FastAPI advanced features
-  - WebSocket implementation for real-time communication
-  - GraphQL for flexible data queries
-  - API versioning and documentation
-
-### Phase 2: AI & ML Integration (Month 2-3)
-- [ ] **Language Models Deep Dive**
-  - Transformer architecture understanding
-  - Fine-tuning techniques for specific tasks
-  - Prompt engineering advanced techniques
-  - Model quantization and optimization
-
-- [ ] **Vector Databases & RAG**
-  - Implement RAG (Retrieval Augmented Generation)
-  - Vector similarity search with Pinecone/Weaviate
-  - Document parsing and chunking strategies
-  - Semantic search and embeddings
-
-- [ ] **Multi-Modal AI**
-  - Image processing with CLIP and DALL-E
-  - Audio processing for voice interfaces
-  - Document analysis and OCR integration
-  - Video processing capabilities
-
-### Phase 3: Production Systems (Month 4-5)
-- [ ] **Kubernetes & Orchestration**
-  - Migrate from Docker Compose to Kubernetes
-  - Helm charts for application deployment
-  - Service mesh with Istio
-  - Auto-scaling and resource management
-
-- [ ] **Observability & Monitoring**
-  - Distributed tracing with Jaeger
-  - Custom metrics and alerting
-  - Log aggregation with ELK stack
-  - Performance monitoring and APM
-
-- [ ] **Security & Compliance**
-  - OAuth 2.0 and OpenID Connect
-  - API rate limiting and DDoS protection
-  - Data encryption and key management
-  - Compliance frameworks (SOC 2, GDPR)
-
-### Phase 4: Advanced Architectures (Month 6)
-- [ ] **Event-Driven Architecture**
-  - Apache Kafka for message streaming
-  - Event sourcing and CQRS patterns
-  - Saga pattern for distributed transactions
-  - Real-time data processing
-
-- [ ] **Advanced AI Patterns**
-  - Multi-agent reinforcement learning
-  - Agent communication protocols
-  - Distributed AI training
-  - Edge AI deployment
-
-- [ ] **Emerging Technologies**
-  - WebAssembly for performance
-  - Serverless architectures
-  - Edge computing integration
-  - Quantum computing applications
-```
-
-#### Intermediate to Expert (6-12 months)
-
-```markdown
-### Phase 5: Research & Innovation (Month 7-9)
-- [ ] **Research Implementation**
-  - Stay current with AI research papers
-  - Implement cutting-edge techniques
-  - Contribute to open-source projects
-  - Write technical blog posts and papers
-
-- [ ] **Custom Model Development**
-  - Build domain-specific language models
-  - Implement custom training pipelines
-  - Distributed training strategies
-  - Model serving at scale
-
-- [ ] **Advanced Multi-Agent Systems**
-  - Hierarchical multi-agent architectures
-  - Agent negotiation and coordination
-  - Swarm intelligence implementation
-  - Game theory applications
-
-### Phase 6: Leadership & Architecture (Month 10-12)
-- [ ] **System Architecture Design**
-  - Design patterns for AI systems
-  - Scalability and performance optimization
-  - Failure mode analysis and recovery
-  - Cost optimization strategies
-
-- [ ] **Team Leadership**
-  - Technical mentoring and guidance
-  - Project management for AI initiatives
-  - Stakeholder communication
-  - Technical decision making
-
-- [ ] **Business Integration**
-  - ROI measurement for AI projects
-  - Ethical AI implementation
-  - Regulatory compliance
-  - Product strategy for AI features
-```
-
-### 🔗 Essential Resources
-
-#### Books
-1. **"Designing Data-Intensive Applications"** by Martin Kleppmann
-2. **"Building Microservices"** by Sam Newman
-3. **"The Hundred-Page Machine Learning Book"** by Andriy Burkov
-4. **"Multi-Agent Systems: Algorithmic, Game-Theoretic, and Logical Foundations"** by Yoav Shoham
-5. **"Patterns of Enterprise Application Architecture"** by Martin Fowler
-
-#### Online Courses
-1. **Multi-Agent Systems** (University of Edinburgh - Coursera)
-2. **Advanced Machine Learning Specialization** (HSE University - Coursera)
-3. **Microservices Patterns** (Chris Richardson)
-4. **Kubernetes for Developers** (Cloud Native Computing Foundation)
-5. **System Design Interview** (Educative.io)
-
-#### Communities & Forums
-1. **AI/ML Communities**: Hugging Face, Papers with Code, /r/MachineLearning
-2. **DevOps Communities**: DevOps.com, CNCF Slack, Docker Community
-3. **Multi-Agent Systems**: AAMAS Conference, Multi-Agent.org
-4. **General Tech**: Stack Overflow, Hacker News, Dev.to
-
-#### Tools & Platforms to Explore
-1. **Orchestration**: Kubernetes, Docker Swarm, Nomad
-2. **AI Platforms**: MLflow, Kubeflow, Weights & Biases
-3. **Monitoring**: Prometheus, Grafana, Datadog, New Relic
-4. **Message Queues**: Apache Kafka, RabbitMQ, Redis Streams
-5. **Databases**: PostgreSQL, MongoDB, Vector DBs (Pinecone, Weaviate)
-
-### 🚀 Project Ideas for Practice
-
-#### Beginner Projects
-1. **Multi-Language Code Assistant**
-   - Support multiple programming languages
-   - Code generation, review, and optimization
-   - Integration with VS Code extension
-
-2. **Smart Document Processor**
-   - PDF/Word document analysis
-   - Automatic summarization and Q&A
-   - Multi-format output generation
-
-3. **Customer Service Agent System**
-   - Multi-channel support (chat, email, voice)
-   - Sentiment analysis and routing
-   - Knowledge base integration
-
-#### Intermediate Projects
-1. **Autonomous DevOps Agent**
-   - Infrastructure monitoring and self-healing
-   - Automated deployment and rollback
-   - Performance optimization recommendations
-
-2. **Multi-Modal Content Creator**
-   - Text-to-image and image-to-text processing
-   - Video content analysis and generation
-   - Social media content optimization
-
-3. **Distributed AI Training Platform**
-   - Multi-node training coordination
-   - Resource allocation and scheduling
-   - Model versioning and deployment
-
-#### Advanced Projects
-1. **Autonomous Research Assistant**
-   - Scientific paper analysis and summarization
-   - Hypothesis generation and testing
-   - Experimental design suggestions
-
-2. **Smart City Management System**
-   - Traffic optimization with multiple agents
-   - Resource allocation (energy, water)
-   - Predictive maintenance scheduling
-
-3. **Financial Trading Agent Network**
-   - Market analysis and prediction
-   - Risk assessment and portfolio management
-   - Real-time trading decision making
-
-## Contribution & Community
-
-### 🤝 How to Contribute
-
-This workshop is open-source and welcomes contributions:
-
-#### Ways to Contribute
-1. **Bug Reports**: Found an issue? Report it on GitHub
-2. **Feature Requests**: Suggest new agents or capabilities
-3. **Documentation**: Improve tutorials and examples
-4. **Code Contributions**: Submit pull requests with improvements
-5. **Community Support**: Help others in discussions
-
-#### Contribution Guidelines
 ```bash
-# Fork the repository
-git fork https://github.com/ajeetraina/docker-cerebras-labspace
+# Create emergency_reset.sh
+cat > emergency_reset.sh << 'EOF'
+#!/bin/bash
 
-# Create a feature branch
-git checkout -b feature/your-feature-name
+echo "🚨 DevDuck Emergency System Reset"
+echo "================================"
+echo "⚠️  WARNING: This will destroy all containers, volumes, and cached data!"
+read -p "Are you sure you want to continue? (type 'YES' to confirm): " confirmation
 
-# Make your changes
-# - Add comprehensive tests
-# - Update documentation
-# - Follow coding standards
+if [ "$confirmation" != "YES" ]; then
+    echo "❌ Reset cancelled"
+    exit 1
+fi
 
-# Commit with descriptive messages
-git commit -m "Add: New specialized agent for data analysis"
+echo "\n🗑️  Stopping and removing all containers..."
+docker compose down -v --remove-orphans
 
-# Push and create pull request
-git push origin feature/your-feature-name
+echo "\n🧹 Cleaning up Docker resources..."
+docker system prune -af --volumes
+
+echo "\n📦 Rebuilding from scratch..."
+docker compose up --build --force-recreate -d
+
+echo "\n⏳ Waiting for services to start..."
+sleep 30
+
+echo "\n🔍 Checking system health..."
+docker compose ps
+curl -f http://localhost:8000/health && echo "\n✅ System reset successful!" || echo "\n❌ System still having issues"
+
+EOF
+
+chmod +x emergency_reset.sh
 ```
 
-### 🌟 Success Stories
+#### Backup and Restore
 
-Share your success stories and use cases:
+```bash
+# Create backup_restore.sh
+cat > backup_restore.sh << 'EOF'
+#!/bin/bash
 
-- **Enterprise Deployments**: How you used DevDuck in production
-- **Educational Use**: Teaching multi-agent systems
-- **Research Applications**: Academic or commercial research
-- **Creative Projects**: Unique applications and innovations
+BACKUP_DIR="./backups/$(date +%Y%m%d_%H%M%S)"
 
-### 📬 Stay Connected
+backup_system() {
+    echo "💾 Creating system backup..."
+    mkdir -p "$BACKUP_DIR"
+    
+    # Backup configuration
+    cp .env compose.yml labspace.yaml "$BACKUP_DIR/" 2>/dev/null || echo "Some config files not found"
+    
+    # Backup Docker volumes
+    docker run --rm -v devduck-model-cache:/data -v "$PWD/$BACKUP_DIR":/backup alpine tar czf /backup/models.tar.gz /data
+    
+    # Backup custom agents
+    cp -r agents "$BACKUP_DIR/" 2>/dev/null || echo "Agents directory not found"
+    
+    # Backup documentation
+    cp -r docs "$BACKUP_DIR/" 2>/dev/null || echo "Docs directory not found"
+    
+    echo "✅ Backup created: $BACKUP_DIR"
+}
 
-- **GitHub**: Follow the repository for updates
-- **Docker Hub**: Check for new container images
-- **Community Discussions**: Participate in GitHub Discussions
-- **Social Media**: Share your projects with #DevDuckMultiAgent
+restore_system() {
+    if [ -z "$1" ]; then
+        echo "❌ Please specify backup directory"
+        echo "Usage: $0 restore <backup_directory>"
+        return 1
+    fi
+    
+    RESTORE_DIR="$1"
+    
+    if [ ! -d "$RESTORE_DIR" ]; then
+        echo "❌ Backup directory not found: $RESTORE_DIR"
+        return 1
+    fi
+    
+    echo "🔄 Restoring from backup: $RESTORE_DIR"
+    
+    # Stop current system
+    docker compose down
+    
+    # Restore configuration
+    cp "$RESTORE_DIR"/*.{env,yml,yaml} . 2>/dev/null || echo "Some config files not in backup"
+    
+    # Restore Docker volumes
+    if [ -f "$RESTORE_DIR/models.tar.gz" ]; then
+        docker run --rm -v devduck-model-cache:/data -v "$PWD/$RESTORE_DIR":/backup alpine tar xzf /backup/models.tar.gz -C /
+    fi
+    
+    # Restore custom code
+    cp -r "$RESTORE_DIR/agents" . 2>/dev/null || echo "No agents backup found"
+    cp -r "$RESTORE_DIR/docs" . 2>/dev/null || echo "No docs backup found"
+    
+    # Start system
+    docker compose up -d
+    
+    echo "✅ System restored from backup"
+}
 
-## Workshop Completion Certificate
+list_backups() {
+    echo "📋 Available backups:"
+    find ./backups -type d -name "[0-9]*" | sort -r | head -10
+}
 
-### 🏆 Congratulations!
+case "$1" in
+    "backup")
+        backup_system
+        ;;
+    "restore")
+        restore_system "$2"
+        ;;
+    "list")
+        list_backups
+        ;;
+    *)
+        echo "Usage: $0 {backup|restore|list}"
+        echo ""
+        echo "Commands:"
+        echo "  backup           - Create a full system backup"
+        echo "  restore <dir>    - Restore from specified backup directory"
+        echo "  list             - List available backups"
+        ;;
+esac
 
-You have successfully completed the **Docker DevDuck Multi-Agent Workshop**!
+EOF
 
-#### What You've Accomplished:
-- ✅ **System Architecture**: Designed and deployed multi-agent systems
-- ✅ **Container Orchestration**: Mastered Docker Compose for AI applications
-- ✅ **Agent Development**: Built local and cloud-based AI agents
-- ✅ **Inter-Agent Communication**: Implemented routing and coordination
-- ✅ **Production Deployment**: Applied enterprise-grade deployment practices
-- ✅ **Monitoring & Optimization**: Set up comprehensive observability
-- ✅ **Security Implementation**: Applied security best practices
-- ✅ **Performance Tuning**: Optimized system performance and scalability
-- ✅ **Troubleshooting Skills**: Developed debugging and problem-solving abilities
-- ✅ **Advanced Features**: Explored cutting-edge multi-agent capabilities
-
-#### Skills Gained:
-- Multi-agent system design and architecture
-- Docker containerization for AI applications
-- API development and integration
-- Cloud AI service integration (Cerebras)
-- Production monitoring and alerting
-- Performance optimization techniques
-- Security implementation and best practices
-- Troubleshooting and debugging methodologies
-
-### 🎯 Your Next Challenge
-
-Choose your next adventure:
-
-1. **Build a Production System**: Deploy DevDuck for a real-world use case
-2. **Contribute to Open Source**: Improve the workshop or create new agents
-3. **Research and Innovation**: Implement cutting-edge AI research
-4. **Teaching and Mentoring**: Share your knowledge with others
-5. **Enterprise Integration**: Apply multi-agent patterns in your organization
-
-### 📜 Certificate Information
-
+chmod +x backup_restore.sh
 ```
-🏆 CERTIFICATE OF COMPLETION
 
-Docker DevDuck Multi-Agent Workshop
+## Performance Monitoring Dashboard
 
-This certifies that you have successfully completed
-the comprehensive multi-agent systems workshop,
-demonstrating proficiency in:
+### 📊 Real-time System Monitor
 
-• Multi-Agent System Architecture & Design
-• Docker Containerization for AI Applications  
-• Production Deployment & Monitoring
-• Performance Optimization & Security
-• Advanced Troubleshooting & Debugging
+```python
+# Create monitoring_dashboard.py
+import time
+import requests
+import psutil
+import docker
+from datetime import datetime
+import json
+import threading
+from collections import deque
 
-Completed: [Current Date]
-Workshop Version: 1.0
-Instructor: Ajeet S Raina, Docker Captain
+class MonitoringDashboard:
+    def __init__(self):
+        self.docker_client = docker.from_env()
+        self.metrics_history = deque(maxlen=100)  # Store last 100 data points
+        self.running = False
+        self.api_url = "http://localhost:8000"
+    
+    def collect_system_metrics(self):
+        """Collect comprehensive system metrics."""
+        try:
+            # System metrics
+            cpu_percent = psutil.cpu_percent(interval=1)
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            
+            # Docker container metrics
+            container_stats = {}
+            try:
+                containers = self.docker_client.containers.list(filters={"name": "devduck"})
+                for container in containers:
+                    stats = container.stats(stream=False)
+                    container_stats[container.name] = {
+                        'cpu_percent': self._calculate_cpu_percent(stats),
+                        'memory_usage': stats['memory_stats']['usage'],
+                        'memory_limit': stats['memory_stats']['limit'],
+                        'network_rx': stats['networks']['eth0']['rx_bytes'] if 'eth0' in stats.get('networks', {}) else 0,
+                        'network_tx': stats['networks']['eth0']['tx_bytes'] if 'eth0' in stats.get('networks', {}) else 0
+                    }
+            except Exception as e:
+                container_stats = {"error": str(e)}
+            
+            # API health check
+            api_healthy = False
+            api_response_time = 0
+            try:
+                start = time.time()
+                response = requests.get(f"{self.api_url}/health", timeout=5)
+                api_response_time = time.time() - start
+                api_healthy = response.status_code == 200
+            except:
+                pass
+            
+            # Compile metrics
+            metrics = {
+                'timestamp': datetime.now().isoformat(),
+                'system': {
+                    'cpu_percent': cpu_percent,
+                    'memory_percent': memory.percent,
+                    'memory_used_gb': memory.used / (1024**3),
+                    'memory_total_gb': memory.total / (1024**3),
+                    'disk_percent': disk.percent,
+                    'disk_free_gb': disk.free / (1024**3)
+                },
+                'containers': container_stats,
+                'api': {
+                    'healthy': api_healthy,
+                    'response_time': api_response_time
+                }
+            }
+            
+            return metrics
+            
+        except Exception as e:
+            return {'error': str(e), 'timestamp': datetime.now().isoformat()}
+    
+    def _calculate_cpu_percent(self, stats):
+        """Calculate CPU percentage from Docker stats."""
+        try:
+            cpu_stats = stats['cpu_stats']
+            precpu_stats = stats['precpu_stats']
+            
+            cpu_usage = cpu_stats['cpu_usage']['total_usage']
+            precpu_usage = precpu_stats['cpu_usage']['total_usage']
+            
+            system_usage = cpu_stats['system_cpu_usage']
+            presystem_usage = precpu_stats['system_cpu_usage']
+            
+            cpu_num = len(cpu_stats['cpu_usage']['percpu_usage'])
+            
+            cpu_delta = cpu_usage - precpu_usage
+            system_delta = system_usage - presystem_usage
+            
+            if system_delta > 0 and cpu_delta > 0:
+                return (cpu_delta / system_delta) * cpu_num * 100.0
+            
+            return 0.0
+        except:
+            return 0.0
+    
+    def start_monitoring(self, interval=10):
+        """Start continuous monitoring."""
+        self.running = True
+        
+        def monitor_loop():
+            while self.running:
+                metrics = self.collect_system_metrics()
+                self.metrics_history.append(metrics)
+                time.sleep(interval)
+        
+        self.monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
+        self.monitor_thread.start()
+        
+        print(f"📊 Monitoring started (interval: {interval}s)")
+    
+    def stop_monitoring(self):
+        """Stop monitoring."""
+        self.running = False
+        print("🛑 Monitoring stopped")
+    
+    def display_dashboard(self):
+        """Display real-time dashboard."""
+        import os
+        
+        while self.running:
+            # Clear screen
+            os.system('clear' if os.name == 'posix' else 'cls')
+            
+            if not self.metrics_history:
+                print("⏳ Waiting for metrics...")
+                time.sleep(2)
+                continue
+            
+            current_metrics = self.metrics_history[-1]
+            
+            print("🖥️  DevDuck Multi-Agent System Dashboard")
+            print("=" * 50)
+            print(f"📅 Last Updated: {current_metrics.get('timestamp', 'Unknown')}")
+            
+            if 'error' in current_metrics:
+                print(f"❌ Error: {current_metrics['error']}")
+            else:
+                # System metrics
+                system = current_metrics.get('system', {})
+                print(f"\n💻 System Resources:")
+                print(f"   CPU: {system.get('cpu_percent', 0):.1f}%")
+                print(f"   Memory: {system.get('memory_percent', 0):.1f}% ({system.get('memory_used_gb', 0):.1f}/{system.get('memory_total_gb', 0):.1f} GB)")
+                print(f"   Disk: {system.get('disk_percent', 0):.1f}% ({system.get('disk_free_gb', 0):.1f} GB free)")
+                
+                # Container metrics
+                containers = current_metrics.get('containers', {})
+                if containers and 'error' not in containers:
+                    print(f"\n🐳 Container Status:")
+                    for name, stats in containers.items():
+                        memory_percent = (stats['memory_usage'] / stats['memory_limit']) * 100 if stats['memory_limit'] > 0 else 0
+                        print(f"   {name}:")
+                        print(f"     CPU: {stats['cpu_percent']:.1f}%")
+                        print(f"     Memory: {memory_percent:.1f}% ({stats['memory_usage']/(1024**3):.2f} GB)")
+                        print(f"     Network: ↓{stats['network_rx']/(1024**2):.1f}MB ↑{stats['network_tx']/(1024**2):.1f}MB")
+                elif 'error' in containers:
+                    print(f"\n🐳 Container Status: ❌ {containers['error']}")
+                
+                # API status
+                api = current_metrics.get('api', {})
+                status_icon = "✅" if api.get('healthy') else "❌"
+                print(f"\n🔗 API Status: {status_icon} {'Healthy' if api.get('healthy') else 'Unhealthy'}")
+                print(f"   Response Time: {api.get('response_time', 0):.3f}s")
+                
+                # Historical trends (last 10 data points)
+                if len(self.metrics_history) >= 2:
+                    print(f"\n📈 Trends (last {min(10, len(self.metrics_history))} measurements):")
+                    recent_metrics = list(self.metrics_history)[-10:]
+                    
+                    cpu_values = [m.get('system', {}).get('cpu_percent', 0) for m in recent_metrics if 'system' in m]
+                    memory_values = [m.get('system', {}).get('memory_percent', 0) for m in recent_metrics if 'system' in m]
+                    
+                    if cpu_values:
+                        print(f"   CPU: {self._generate_sparkline(cpu_values)} (avg: {sum(cpu_values)/len(cpu_values):.1f}%)")
+                    if memory_values:
+                        print(f"   Memory: {self._generate_sparkline(memory_values)} (avg: {sum(memory_values)/len(memory_values):.1f}%)")
+                
+                # Alerts
+                alerts = self._generate_alerts(current_metrics)
+                if alerts:
+                    print(f"\n🚨 Alerts:")
+                    for alert in alerts:
+                        print(f"   {alert}")
+            
+            print(f"\n⌨️  Press Ctrl+C to stop monitoring")
+            time.sleep(5)
+    
+    def _generate_sparkline(self, values, width=20):
+        """Generate a simple ASCII sparkline."""
+        if not values:
+            return ""
+        
+        min_val = min(values)
+        max_val = max(values)
+        range_val = max_val - min_val if max_val > min_val else 1
+        
+        chars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
+        sparkline = ""
+        
+        for value in values[-width:]:
+            normalized = (value - min_val) / range_val
+            char_index = min(int(normalized * (len(chars) - 1)), len(chars) - 1)
+            sparkline += chars[char_index]
+        
+        return sparkline
+    
+    def _generate_alerts(self, metrics):
+        """Generate alerts based on current metrics."""
+        alerts = []
+        
+        if 'system' in metrics:
+            system = metrics['system']
+            
+            if system.get('cpu_percent', 0) > 85:
+                alerts.append("⚠️  High CPU usage detected")
+            if system.get('memory_percent', 0) > 90:
+                alerts.append("⚠️  High memory usage detected")
+            if system.get('disk_percent', 0) > 85:
+                alerts.append("⚠️  Low disk space")
+        
+        if 'api' in metrics:
+            api = metrics['api']
+            
+            if not api.get('healthy'):
+                alerts.append("🚨 API is unhealthy")
+            if api.get('response_time', 0) > 5:
+                alerts.append("⚠️  Slow API response time")
+        
+        return alerts
+    
+    def export_metrics(self, filename=None):
+        """Export metrics to JSON file."""
+        if not filename:
+            filename = f"metrics_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        
+        with open(filename, 'w') as f:
+            json.dump(list(self.metrics_history), f, indent=2)
+        
+        print(f"📊 Metrics exported to {filename}")
 
-"The future belongs to those who can orchestrate
-intelligence across distributed systems."
+# Main monitoring application
+if __name__ == '__main__':
+    import signal
+    import sys
+    
+    dashboard = MonitoringDashboard()
+    
+    def signal_handler(sig, frame):
+        print('\n🛑 Stopping dashboard...')
+        dashboard.stop_monitoring()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # Start monitoring
+    dashboard.start_monitoring(interval=5)
+    
+    try:
+        dashboard.display_dashboard()
+    except KeyboardInterrupt:
+        dashboard.stop_monitoring()
+        dashboard.export_metrics()
+        print("\n👋 Dashboard stopped")
 ```
+
+## Future Enhancement Ideas
+
+### 🚀 Advanced Features to Explore
+
+1. **AI Model Fine-tuning**
+   - Custom training on domain-specific data
+   - Model distillation for performance
+   - Federated learning approaches
+
+2. **Advanced Agent Capabilities**
+   - Multi-modal agents (text + images + audio)
+   - Specialized domain agents (medical, legal, financial)
+   - Self-improving agents with feedback loops
+
+3. **Enterprise Integrations**
+   - Slack/Teams bot integration
+   - CRM system integration
+   - Document management system connectors
+   - API gateway integration
+
+4. **Scalability Enhancements**
+   - Kubernetes operators for auto-scaling
+   - Edge deployment for reduced latency
+   - Multi-region deployment
+   - Cost optimization algorithms
+
+5. **Security Improvements**
+   - Zero-trust architecture
+   - End-to-end encryption
+   - Audit logging and compliance
+   - Privacy-preserving techniques
+
+### 🎓 Learning Resources
+
+**Recommended Reading:**
+- "Multi-Agent Systems" by Gerhard Weiss
+- "Docker Deep Dive" by Nigel Poulton
+- "Designing Data-Intensive Applications" by Martin Kleppmann
+- "Building Microservices" by Sam Newman
+
+**Online Courses:**
+- Docker and Kubernetes certification paths
+- Machine Learning Operations (MLOps) courses
+- Cloud architecture certifications
+- AI/ML specializations on Coursera/edX
+
+**Communities:**
+- Docker Community Slack
+- Kubernetes Community
+- AI/ML Reddit communities
+- Local Docker and DevOps meetups
+
+### 🛠️ Development Environment Setup
+
+```bash
+# Create development environment setup
+cat > setup_dev_environment.sh << 'EOF'
+#!/bin/bash
+
+echo "🛠️ Setting up DevDuck Development Environment"
+echo "=============================================="
+
+# Install development tools
+echo "📦 Installing development tools..."
+
+# Python development
+pip install -U pip
+pip install black flake8 pytest pytest-cov mypy
+pip install jupyter notebook ipython
+
+# Docker development
+echo "🐳 Setting up Docker development tools..."
+docker plugin install store/sumologic/docker-output-driver:1.0.0 || echo "Plugin already installed"
+
+# Pre-commit hooks
+echo "🎣 Setting up pre-commit hooks..."
+pip install pre-commit
+
+cat > .pre-commit-config.yaml << 'PRECOMMIT'
+repos:
+-   repo: https://github.com/psf/black
+    rev: 22.3.0
+    hooks:
+    -   id: black
+        language_version: python3
+-   repo: https://github.com/pycqa/flake8
+    rev: 4.0.1
+    hooks:
+    -   id: flake8
+        args: [--max-line-length=88, --extend-ignore=E203]
+-   repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v0.950
+    hooks:
+    -   id: mypy
+        additional_dependencies: [types-requests]
+PRECOMMIT
+
+pre-commit install
+
+# Testing framework
+echo "🧪 Setting up testing framework..."
+mkdir -p tests
+
+cat > tests/test_agents.py << 'PYTEST'
+import pytest
+import requests
+import time
+
+def test_health_endpoint():
+    """Test that the health endpoint is accessible."""
+    response = requests.get('http://localhost:8000/health')
+    assert response.status_code == 200
+
+def test_basic_chat():
+    """Test basic chat functionality."""
+    response = requests.post(
+        'http://localhost:8000/chat',
+        json={
+            'message': 'Hello test',
+            'conversation_id': 'test-123'
+        }
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert 'response' in data
+
+def test_agent_routing():
+    """Test that different query types route appropriately."""
+    test_cases = [
+        {'message': 'Hello', 'expected_fast': True},
+        {'message': 'Design a complex distributed system architecture', 'expected_fast': False}
+    ]
+    
+    for case in test_cases:
+        start_time = time.time()
+        response = requests.post(
+            'http://localhost:8000/chat',
+            json={
+                'message': case['message'],
+                'conversation_id': f'routing-test-{int(time.time())}'
+            }
+        )
+        duration = time.time() - start_time
+        
+        assert response.status_code == 200
+        
+        if case['expected_fast']:
+            assert duration < 5, f"Expected fast response, got {duration:.2f}s"
+        # Note: We don't test slow responses in CI as they may timeout
+
+PYTEST
+
+# Documentation tools
+echo "📚 Setting up documentation tools..."
+pip install mkdocs mkdocs-material mkdocs-mermaid2-plugin
+
+# Development compose override
+echo "🔧 Creating development compose override..."
+cat > compose.dev.yml << 'DEVCOMPOSE'
+version: '3.8'
+services:
+  devduck-agent:
+    build:
+      context: ./agents
+      target: development
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - RELOAD=true
+    volumes:
+      - ./agents:/app:ro
+      - /app/__pycache__
+    ports:
+      - "8000:8000"
+      - "5678:5678"  # Debugger port
+DEVCOMPOSE
+
+echo "✅ Development environment setup complete!"
+echo ""
+echo "📋 Next steps:"
+echo "   1. Run tests: pytest tests/"
+echo "   2. Start development server: docker compose -f compose.yml -f compose.dev.yml up"
+echo "   3. Format code: black agents/"
+echo "   4. Check types: mypy agents/"
+echo "   5. Build docs: mkdocs serve"
+
+EOF
+
+chmod +x setup_dev_environment.sh
+```
+
+## Workshop Completion
+
+### 🎉 Congratulations!
+
+You've successfully completed the Docker DevDuck Multi-Agent Workshop! You've gained expertise in:
+
+#### ✅ **Core Competencies Mastered**
+
+1. **Multi-Agent System Architecture**
+   - Understanding agent roles and responsibilities
+   - Designing communication patterns
+   - Implementing orchestration logic
+
+2. **Docker Containerization**
+   - Container orchestration with Docker Compose
+   - Volume management and networking
+   - Production deployment strategies
+
+3. **AI Integration**
+   - Local model management and optimization
+   - Cloud AI service integration (Cerebras)
+   - Intelligent request routing
+
+4. **Production Operations**
+   - Monitoring and observability
+   - Security implementation
+   - Performance optimization
+   - Troubleshooting and debugging
+
+5. **Enterprise Deployment**
+   - Kubernetes deployment
+   - Auto-scaling strategies
+   - High availability configuration
+   - Disaster recovery planning
+
+#### 📊 **Workshop Statistics**
+- **10 comprehensive labs** completed
+- **50+ hands-on exercises** mastered  
+- **20+ production tools** implemented
+- **100+ code examples** explored
+- **Enterprise-grade skills** developed
+
+### 🎯 **Next Steps for Continued Learning**
+
+1. **Immediate Actions** (Next 1-2 weeks)
+   - Deploy your system to a cloud provider
+   - Implement monitoring and alerting
+   - Add custom agents for your specific use cases
+   - Share your experience with the community
+
+2. **Short-term Goals** (Next 1-3 months)
+   - Integrate with enterprise systems (Slack, CRM, etc.)
+   - Implement advanced security features
+   - Optimize for production workloads
+   - Contribute to open-source projects
+
+3. **Long-term Vision** (3+ months)
+   - Build specialized domain agents
+   - Explore multi-modal AI capabilities
+   - Develop agent marketplace
+   - Lead AI transformation in your organization
+
+### 🌟 **Community and Support**
+
+- **Share Your Success**: Post about your workshop completion on LinkedIn/Twitter with #DockerDevDuck
+- **Join Communities**: Engage with Docker, AI/ML, and DevOps communities
+- **Contribute Back**: Help others by answering questions and sharing knowledge
+- **Keep Learning**: Stay updated with latest developments in AI and containerization
+
+### 📜 **Workshop Certificate**
+
+You've earned expertise equivalent to:
+- Docker Certified Associate level knowledge
+- MLOps intermediate proficiency
+- Multi-agent systems specialist understanding
+- Production deployment competency
 
 ---
 
-## Final Words
+## 🚀 **Ready to Build the Future with Multi-Agent Systems!**
 
-Thank you for completing the Docker DevDuck Multi-Agent Workshop! You've gained valuable skills in building, deploying, and managing sophisticated AI systems using modern containerization practices.
+The skills you've developed in this workshop position you at the forefront of AI and containerization technology. Multi-agent systems represent the future of intelligent applications, and you now have the expertise to build, deploy, and scale them effectively.
 
-The field of multi-agent systems is rapidly evolving, and the foundation you've built here will serve you well as you continue to innovate and build the next generation of intelligent applications.
+Remember: The journey of learning never ends. Stay curious, keep experimenting, and continue building amazing things!
 
-Remember: The best way to master these concepts is through continuous practice and experimentation. Keep building, keep learning, and don't hesitate to contribute back to the community.
-
-**Happy Building!** 🚀🐋🤖
+**Happy Building! 🐳🤖✨**
 
 ---
 
-!!! success "Workshop Complete! 🎉"
-    You are now equipped with the knowledge and skills to build production-grade multi-agent systems. The journey doesn't end here – it's just the beginning of your adventure in intelligent system orchestration!
+!!! success "🎓 Workshop Mastery Achieved!"
+    You are now equipped with enterprise-grade skills for building and deploying sophisticated multi-agent systems. Use this knowledge to drive innovation and create intelligent solutions that make a real impact.
