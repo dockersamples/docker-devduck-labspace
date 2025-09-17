@@ -1,0 +1,26 @@
+title: Docker DevDuck Multi-Agent Workshop
+description: |
+  Learn to build and deploy multi-agent systems with Docker, Google Agent Development Kit (ADK), and Cerebras AI.
+  This hands-on workshop covers agent orchestration, multi-agent communication, and real-world Node.js development scenarios.
+author: Ajeet S Raina
+sections:
+  - title: Introduction
+    contentPath: ./docs/01-introduction.md
+  - title: Prerequisites & System Overview
+    contentPath: ./docs/02-prerequisites.md
+  - title: Getting Started
+    contentPath: ./docs/03-getting-started.md
+  - title: Environment Setup & Deployment
+    contentPath: ./docs/04-environment-setup.md
+  - title: Basic Multi-Agent Interaction
+    contentPath: ./docs/05-basic-interaction.md
+  - title: Local Agent Tasks
+    contentPath: ./docs/06-local-agent.md
+  - title: Cerebras Analysis & Intelligence
+    contentPath: ./docs/07-cerebras-analysis.md
+  - title: Agent Routing & Communication
+    contentPath: ./docs/08-agent-routing.md
+  - title: Advanced Features & Best Practices
+    contentPath: ./docs/09-advanced-features.md
+  - title: Troubleshooting & Next Steps
+    contentPath: ./docs/10-next-steps.md
