@@ -51,7 +51,7 @@ To run this labspace, ensure you have Docker installed on your system:
 
 ```bash
 export CONTENT_REPO_URL=$(git remote get-url origin)
-docker compose -f oci://dockersamples/labspace up -y
+docker compose -f oci://dockersamples/docker-devduck-labspace up -y
 ```
 
 Then open your browser to [http://localhost:3030](http://localhost:3030)
