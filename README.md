@@ -116,8 +116,6 @@ After completing this labspace, you'll be able to:
 └── README.md            # This file
 ```
 
-## Contributing
 
-This labspace is part of the Docker educational content ecosystem. Contributions and improvements are welcome!
 
 
