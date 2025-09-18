@@ -120,10 +120,4 @@ After completing this labspace, you'll be able to:
 
 This labspace is part of the Docker educational content ecosystem. Contributions and improvements are welcome!
 
-## License
 
-This labspace is licensed under the Apache 2.0 License - see the LICENSE file for details.
-
----
-
-**Ready to start?** Open the labspace and begin with the Introduction section to start your multi-agent journey!
